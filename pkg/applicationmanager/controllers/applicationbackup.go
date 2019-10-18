@@ -260,6 +260,14 @@ func (a *ApplicationBackupController) namespaceBackupAllowed(backup *stork_api.A
 	return true
 }
 
+func (a *ApplicationBackupController) getDriversForBackup(backup *stork_api.ApplicationBackup) map[string]bool {
+	drivers := make(map[string]bool)
+	for _, volumeInfo := range backup.Status.Volumes {
+		drivers[volumeInfo.DriverName] = true
+	}
+	return drivers
+}
+
 func (a *ApplicationBackupController) backupVolumes(backup *stork_api.ApplicationBackup, terminationChannels []chan bool) error {
 	defer func() {
 		for _, channel := range terminationChannels {
@@ -268,97 +276,152 @@ func (a *ApplicationBackupController) backupVolumes(backup *stork_api.Applicatio
 	}()
 
 	// Start backup of the volumes if we don't have any status stored
-	backup.Status.Stage = stork_api.ApplicationBackupStageVolumes
 	if backup.Status.Volumes == nil {
-		volumeInfos, err := a.Driver.StartBackup(backup)
-		if err != nil {
-			message := fmt.Sprintf("Error starting ApplicationBackup for volumes: %v", err)
-			log.ApplicationBackupLog(backup).Errorf(message)
-			a.Recorder.Event(backup,
-				v1.EventTypeWarning,
-				string(stork_api.ApplicationBackupStatusFailed),
-				message)
-
-			// Cancel any backups that might have started and mark the backup as failed
-
-			if err := wait.ExponentialBackoff(backupCancelBackoff, func() (bool, error) {
-				err := a.Driver.CancelBackup(backup)
-				if err != nil {
-					message := fmt.Sprintf("Error cancelling ApplicationBackup for volumes, retrying: %v", err)
-					log.ApplicationBackupLog(backup).Errorf(message)
-					a.Recorder.Event(backup,
-						v1.EventTypeWarning,
-						string(stork_api.ApplicationBackupStatusFailed),
-						message)
-					return false, nil
-				}
-				return true, nil
-			}); err != nil {
-				message := fmt.Sprintf("Error cancelling ApplicationBackup for volumes, will not retry further: %v", err)
-				log.ApplicationBackupLog(backup).Errorf(message)
-				a.Recorder.Event(backup,
-					v1.EventTypeWarning,
-					string(stork_api.ApplicationBackupStatusFailed),
-					message)
+		pvcMappings := make(map[string][]*v1.PersistentVolumeClaim)
+		backup.Status.Stage = stork_api.ApplicationBackupStageVolumes
+		backup.Status.Volumes = make([]*stork_api.ApplicationBackupVolumeInfo, 0)
+		for _, namespace := range backup.Spec.Namespaces {
+			pvcList, err := k8s.Instance().GetPersistentVolumeClaims(namespace, backup.Spec.Selectors)
+			if err != nil {
+				return fmt.Errorf("error getting list of volumes to migrate: %v", err)
 			}
 
-			backup.Status.Status = stork_api.ApplicationBackupStatusFailed
-			err = sdk.Update(backup)
+			for _, pvc := range pvcList.Items {
+				driverName, err := volume.GetPVCDriver(&pvc)
+				if err != nil {
+					return err
+				}
+				if driverName != "" {
+					if pvcMappings[driverName] == nil {
+						pvcMappings[driverName] = make([]*v1.PersistentVolumeClaim, 0)
+					}
+					pvcMappings[driverName] = append(pvcMappings[driverName], &pvc)
+				}
+			}
+		}
+		for driverName, pvcs := range pvcMappings {
+			driver, err := volume.Get(driverName)
 			if err != nil {
 				return err
 			}
-			return nil
-		}
-		backup.Status.Volumes = volumeInfos
-		backup.Status.Status = stork_api.ApplicationBackupStatusInProgress
-		err = sdk.Update(backup)
-		if err != nil {
-			return err
-		}
 
-		// Terminate any background rules that were started
-		for _, channel := range terminationChannels {
-			channel <- true
-		}
-		terminationChannels = nil
-
-		// Run any post exec rules once backup is triggered
-		if backup.Spec.PostExecRule != "" {
-			err = a.runPostExecRule(backup)
+			volumeInfos, err := driver.StartBackup(backup, pvcs)
 			if err != nil {
-				message := fmt.Sprintf("Error running PostExecRule: %v", err)
-				log.ApplicationBackupLog(backup).Errorf(message)
-				a.Recorder.Event(backup,
-					v1.EventTypeWarning,
-					string(stork_api.ApplicationBackupStatusFailed),
-					message)
-
-				err := a.Driver.CancelBackup(backup)
-				if err != nil {
-					log.ApplicationBackupLog(backup).Errorf("Error cancelling backups: %v", err)
-				}
-				backup.Status.Stage = stork_api.ApplicationBackupStageFinal
-				backup.Status.FinishTimestamp = metav1.Now()
+				// TODO: If starting backup for a drive fails mark the entire backup
+				// as Cancelling, cancel any other started backups and then mark
+				// it as failed
 				backup.Status.Status = stork_api.ApplicationBackupStatusFailed
 				err = sdk.Update(backup)
 				if err != nil {
 					return err
 				}
-				return fmt.Errorf("%v", message)
+				return nil
 			}
+
+			backup.Status.Volumes = append(backup.Status.Volumes, volumeInfos...)
 		}
 	}
+	/*
+		if backup.Status.Volumes == nil {
+			volumeInfos, err := a.Driver.StartBackup(backup)
+			if err != nil {
+				message := fmt.Sprintf("Error starting ApplicationBackup for volumes: %v", err)
+				log.ApplicationBackupLog(backup).Errorf(message)
+				a.Recorder.Event(backup,
+					v1.EventTypeWarning,
+					string(stork_api.ApplicationBackupStatusFailed),
+					message)
+
+				// Cancel any backups that might have started and mark the backup as failed
+
+				if err := wait.ExponentialBackoff(backupCancelBackoff, func() (bool, error) {
+					err := a.Driver.CancelBackup(backup)
+					if err != nil {
+						message := fmt.Sprintf("Error cancelling ApplicationBackup for volumes, retrying: %v", err)
+						log.ApplicationBackupLog(backup).Errorf(message)
+						a.Recorder.Event(backup,
+							v1.EventTypeWarning,
+							string(stork_api.ApplicationBackupStatusFailed),
+							message)
+						return false, nil
+					}
+					return true, nil
+				}); err != nil {
+					message := fmt.Sprintf("Error cancelling ApplicationBackup for volumes, will not retry further: %v", err)
+					log.ApplicationBackupLog(backup).Errorf(message)
+					a.Recorder.Event(backup,
+						v1.EventTypeWarning,
+						string(stork_api.ApplicationBackupStatusFailed),
+						message)
+				}
+
+				backup.Status.Status = stork_api.ApplicationBackupStatusFailed
+				err = sdk.Update(backup)
+				if err != nil {
+					return err
+				}
+				return nil
+			}
+			backup.Status.Volumes = volumeInfos
+			backup.Status.Status = stork_api.ApplicationBackupStatusInProgress
+			err = sdk.Update(backup)
+			if err != nil {
+				return err
+			}
+
+			// Terminate any background rules that were started
+			for _, channel := range terminationChannels {
+				channel <- true
+			}
+			terminationChannels = nil
+
+			// Run any post exec rules once backup is triggered
+			if backup.Spec.PostExecRule != "" {
+				err = a.runPostExecRule(backup)
+				if err != nil {
+					message := fmt.Sprintf("Error running PostExecRule: %v", err)
+					log.ApplicationBackupLog(backup).Errorf(message)
+					a.Recorder.Event(backup,
+						v1.EventTypeWarning,
+						string(stork_api.ApplicationBackupStatusFailed),
+						message)
+
+					err := a.Driver.CancelBackup(backup)
+					if err != nil {
+						log.ApplicationBackupLog(backup).Errorf("Error cancelling backups: %v", err)
+					}
+					backup.Status.Stage = stork_api.ApplicationBackupStageFinal
+					backup.Status.FinishTimestamp = metav1.Now()
+					backup.Status.Status = stork_api.ApplicationBackupStatusFailed
+					err = sdk.Update(backup)
+					if err != nil {
+						return err
+					}
+					return fmt.Errorf("%v", message)
+				}
+			}
+		}
+	*/
 
 	inProgress := false
 	// Skip checking status if no volumes are being backed up
 	if len(backup.Status.Volumes) != 0 {
 		var err error
-		volumeInfos, err := a.Driver.GetBackupStatus(backup)
-		if err != nil {
-			return err
-		}
-		if volumeInfos == nil {
-			volumeInfos = make([]*stork_api.ApplicationBackupVolumeInfo, 0)
+		drivers := a.getDriversForBackup(backup)
+
+		volumeInfos := make([]*stork_api.ApplicationBackupVolumeInfo, 0)
+		for driverName := range drivers {
+
+			driver, err := volume.Get(driverName)
+			if err != nil {
+				return err
+			}
+
+			status, err := driver.GetBackupStatus(backup)
+			if err != nil {
+				return fmt.Errorf("error getting backup status for driver %v: %v", driver, err)
+			}
+			volumeInfos = append(volumeInfos, status...)
 		}
 		backup.Status.Volumes = volumeInfos
 		// Store the new status
