@@ -373,8 +373,32 @@ func (b *BackupRestoreNotSupported) CancelRestore(*stork_crd.ApplicationRestore)
 type CloneNotSupported struct{}
 
 // CreateVolumeClones returns ErrNotSupported
-func (v *CloneNotSupported) CreateVolumeClones(*stork_crd.ApplicationClone) error {
+func (c *CloneNotSupported) CreateVolumeClones(*stork_crd.ApplicationClone) error {
 	return &errors.ErrNotSupported{}
+}
+
+// SnapshotRestoreNotSupported to be used by drivers that don't support
+// volume snapshot restore
+type SnapshotRestoreNotSupported struct{}
+
+// CompleteVolumeSnapshotRestore returns ErrNotSupported
+func (s *SnapshotRestoreNotSupported) CompleteVolumeSnapshotRestore(snap *stork_crd.VolumeSnapshotRestore) error {
+	return &errors.ErrNotSupported{}
+}
+
+// StartVolumeSnapshotRestore returns ErrNotSupported
+func (s *SnapshotRestoreNotSupported) StartVolumeSnapshotRestore(*stork_crd.VolumeSnapshotRestore) error {
+	return &errors.ErrNotSupported{}
+}
+
+// GetVolumeSnapshotRestoreStatus returns ErrNotSupported
+func (s *SnapshotRestoreNotSupported) GetVolumeSnapshotRestoreStatus(*stork_crd.VolumeSnapshotRestore) error {
+	return &errors.ErrNotSupported{}
+}
+
+// CleanupSnapshotRestoreObjects deletes restore objects if any
+func (s *SnapshotRestoreNotSupported) CleanupSnapshotRestoreObjects(*stork_crd.VolumeSnapshotRestore) error {
+	return &errors.ErrNotImplemented{}
 }
 
 // IsNodeMatch There are a couple of things that need to be checked to see if the driver
