@@ -310,6 +310,12 @@ func (a *ApplicationBackupController) backupVolumes(backup *stork_api.Applicatio
 				// TODO: If starting backup for a drive fails mark the entire backup
 				// as Cancelling, cancel any other started backups and then mark
 				// it as failed
+				message := fmt.Sprintf("Error starting ApplicationBackup for volumes: %v", err)
+				log.ApplicationBackupLog(backup).Errorf(message)
+				a.Recorder.Event(backup,
+					v1.EventTypeWarning,
+					string(stork_api.ApplicationBackupStatusFailed),
+					message)
 				backup.Status.Status = stork_api.ApplicationBackupStatusFailed
 				err = sdk.Update(backup)
 				if err != nil {
@@ -319,6 +325,43 @@ func (a *ApplicationBackupController) backupVolumes(backup *stork_api.Applicatio
 			}
 
 			backup.Status.Volumes = append(backup.Status.Volumes, volumeInfos...)
+		}
+		backup.Status.Status = stork_api.ApplicationBackupStatusInProgress
+		err := sdk.Update(backup)
+		if err != nil {
+			return err
+		}
+
+		// Terminate any background rules that were started
+		for _, channel := range terminationChannels {
+			channel <- true
+		}
+		terminationChannels = nil
+
+		// Run any post exec rules once backup is triggered
+		if backup.Spec.PostExecRule != "" {
+			err = a.runPostExecRule(backup)
+			if err != nil {
+				message := fmt.Sprintf("Error running PostExecRule: %v", err)
+				log.ApplicationBackupLog(backup).Errorf(message)
+				a.Recorder.Event(backup,
+					v1.EventTypeWarning,
+					string(stork_api.ApplicationBackupStatusFailed),
+					message)
+
+				err := a.Driver.CancelBackup(backup)
+				if err != nil {
+					log.ApplicationBackupLog(backup).Errorf("Error cancelling backups: %v", err)
+				}
+				backup.Status.Stage = stork_api.ApplicationBackupStageFinal
+				backup.Status.FinishTimestamp = metav1.Now()
+				backup.Status.Status = stork_api.ApplicationBackupStatusFailed
+				err = sdk.Update(backup)
+				if err != nil {
+					return err
+				}
+				return fmt.Errorf("%v", message)
+			}
 		}
 	}
 	/*
