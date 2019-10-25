@@ -117,10 +117,10 @@ storkctl:
 
 container: help
 	@echo "Building container: docker build --tag $(STORK_IMG) -f Dockerfile ."
-	sudo docker build --tag $(STORK_IMG) --no-cache -f Dockerfile .
+	sudo docker build --tag $(STORK_IMG) -f Dockerfile .
 
 	@echo "Building container: docker build --tag $(CMD_EXECUTOR_IMG) -f Dockerfile.cmdexecutor ."
-	sudo docker build --tag $(CMD_EXECUTOR_IMG) --no-cache -f Dockerfile.cmdexecutor .
+	sudo docker build --tag $(CMD_EXECUTOR_IMG) -f Dockerfile.cmdexecutor .
 
 help:
 	@echo "Updating help file"

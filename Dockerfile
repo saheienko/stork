@@ -20,6 +20,6 @@ RUN pip3 install pyyaml==5.1 rsa==4.0 --upgrade -t /google-cloud-sdk/lib/third_p
 WORKDIR /
 
 COPY ./bin/stork /
-COPY ./bin/linux/storkctl /storkctl/linux/
-COPY ./bin/darwin/storkctl /storkctl/darwin/
-COPY ./bin/windows/storkctl.exe /storkctl/windows/
+#COPY ./bin/linux/storkctl /storkctl/linux/
+#COPY ./bin/darwin/storkctl /storkctl/darwin/
+#COPY ./bin/windows/storkctl.exe /storkctl/windows/

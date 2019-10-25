@@ -1,13 +1,27 @@
 package gcp
 
 import (
+	"context"
+	"fmt"
+
+	"cloud.google.com/go/compute/metadata"
 	snapv1 "github.com/kubernetes-incubator/external-storage/snapshot/pkg/apis/crd/v1"
 	snapshotVolume "github.com/kubernetes-incubator/external-storage/snapshot/pkg/volume"
 	storkvolume "github.com/libopenstorage/stork/drivers/volume"
+	storkapi "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
 	"github.com/libopenstorage/stork/pkg/errors"
+	"github.com/libopenstorage/stork/pkg/log"
 	"github.com/portworx/sched-ops/k8s"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
+	"google.golang.org/api/compute/v1"
+	"google.golang.org/api/option"
 	"k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/uuid"
 	k8shelper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
 )
 
@@ -22,19 +36,45 @@ const (
 	// pvProvisionedByAnnotation is the annotation on PV which has the
 	// provisioner name
 	pvProvisionedByAnnotation = "pv.kubernetes.io/provisioned-by"
+	pvNamePrefix              = "pvc-"
 )
 
 type gcp struct {
+	projectID string
+	zone      string
+	service   *compute.Service
 	storkvolume.ClusterPairNotSupported
 	storkvolume.MigrationNotSupported
 	storkvolume.GroupSnapshotNotSupported
 	storkvolume.ClusterDomainsNotSupported
-	storkvolume.BackupRestoreNotSupported
 	storkvolume.CloneNotSupported
 	storkvolume.SnapshotRestoreNotSupported
 }
 
 func (g *gcp) Init(_ interface{}) error {
+	var err error
+	g.zone, err = metadata.Zone()
+	if err != nil {
+		return fmt.Errorf("error getting zone for gce: %v", err)
+	}
+
+	g.projectID, err = metadata.ProjectID()
+	if err != nil {
+		return fmt.Errorf("error getting projectID for gce: %v", err)
+	}
+
+	creds, err := google.FindDefaultCredentials(oauth2.NoContext, compute.ComputeScope)
+	if err != nil {
+		return err
+	}
+
+	//	client := oauth2.NewClient(oauth2.NoContext, creds.TokenSource)
+
+	g.service, err = compute.NewService(context.TODO(), option.WithTokenSource(creds.TokenSource))
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -95,43 +135,189 @@ func isCsiProvisioner(provisioner string) bool {
 	return false
 }
 
-func (g *gcp) StartBackup(backup *stork_crd.ApplicationBackup,
+func (g *gcp) StartBackup(backup *storkapi.ApplicationBackup,
 	pvcs []*v1.PersistentVolumeClaim,
-) ([]*stork_crd.ApplicationBackupVolumeInfo, error) {
+) ([]*storkapi.ApplicationBackupVolumeInfo, error) {
+	volumeInfos := make([]*storkapi.ApplicationBackupVolumeInfo, 0)
+
 	for _, pvc := range pvcs {
 		if pvc.DeletionTimestamp != nil {
 			log.ApplicationBackupLog(backup).Warnf("Ignoring PVC %v which is being deleted", pvc.Name)
 			continue
 		}
-		volumeInfo := &stork_crd.ApplicationBackupVolumeInfo{}
+		volumeInfo := &storkapi.ApplicationBackupVolumeInfo{}
 		volumeInfo.PersistentVolumeClaim = pvc.Name
 		volumeInfo.Namespace = pvc.Namespace
 		volumeInfo.DriverName = driverName
 		volumeInfos = append(volumeInfos, volumeInfo)
 
-		volume, err := k8s.Instance().GetVolumeForPersistentVolumeClaim(pvc)
+		pvName, err := k8s.Instance().GetVolumeForPersistentVolumeClaim(pvc)
 		if err != nil {
-			return nil, fmt.Errorf("Error getting volume for PVC: %v", err)
+			return nil, fmt.Errorf("Error getting PV name for PVC (%v/%v): %v", pvc.Namespace, pvc.Name, err)
 		}
+		pv, err := k8s.Instance().GetPersistentVolume(pvName)
+		if err != nil {
+			return nil, fmt.Errorf("Error getting pv %v: %v", pvName, err)
+		}
+		volume := pv.Spec.GCEPersistentDisk.PDName
 		volumeInfo.Volume = volume
-		taskID := p.getBackupRestoreTaskID(backup.UID, volumeInfo.Namespace, volumeInfo.PersistentVolumeClaim)
-		credID := p.getCredID(backup.Spec.BackupLocation, backup.Namespace)
-		request := &api.CloudBackupCreateRequest{
-			VolumeID:       volume,
-			CredentialUUID: credID,
-			Name:           taskID,
+		snapshot := &compute.Snapshot{
+			Name: "stork-snapshot-" + string(uuid.NewUUID()),
+			Labels: map[string]string{
+				"created-by":           "stork",
+				"backup-uid":           string(backup.UID),
+				"source-pvc-name":      pvc.Name,
+				"source-pvc-namespace": pvc.Namespace,
+			},
 		}
-		request.Labels = make(map[string]string)
-		request.Labels[cloudBackupOwnerLabel] = "stork"
-		p.addApplicationBackupCloudsnapInfo(request, backup)
+		snapshotCall := g.service.Disks.CreateSnapshot(g.projectID, g.zone, volume, snapshot)
 
-		_, err = volDriver.CloudBackupCreate(request)
+		// Set the Request ID to the unique name to get idempotency
+		//snapshotCall = snapshotCall.RequestId(snapshot.Name)
+
+		_, err = snapshotCall.Do()
 		if err != nil {
-			if _, ok := err.(*ost_errors.ErrExists); !ok {
-				return nil, err
-			}
+			return nil, fmt.Errorf("Error triggering backup for volume: %v (PVC: %v, Namespace: %v): %v", volume, pvc.Name, pvc.Namespace, err)
+		}
+		volumeInfo.BackupID = snapshot.Name
+	}
+	return volumeInfos, nil
+}
+
+func (g *gcp) GetBackupStatus(backup *storkapi.ApplicationBackup) ([]*storkapi.ApplicationBackupVolumeInfo, error) {
+	for _, vInfo := range backup.Status.Volumes {
+		snapshot, err := g.service.Snapshots.Get(g.projectID, vInfo.BackupID).Do()
+		/*
+			filter := fmt.Sprintf("(labels.created-by=\"stork\") AND (labels.backup-uid=\"%v\") AND (labels.source-pvc-name=\"%v\") AND (labels.source-pvc-namespace=\"%v\")",
+				backup.UID, vInfo.PersistentVolumeClaim, vInfo.Namespace)
+			snapshots, err := g.service.Snapshots.List(g.projectID).Filter(filter).Do()
+		*/
+		if err != nil {
+			return nil, err
+		}
+		//snapshot := snapshots.Items[0]
+		switch snapshot.Status {
+		case "CREATING", "UPLOADING":
+			vInfo.Status = storkapi.ApplicationBackupStatusInProgress
+			vInfo.Reason = fmt.Sprintf("Volume backup in progress: %v", snapshot.Status)
+		case "DELETING", "FAILED":
+			vInfo.Status = storkapi.ApplicationBackupStatusFailed
+			vInfo.Reason = fmt.Sprintf("Backup failed for volume: %v", snapshot.Status)
+		case "READY":
+			vInfo.BackupID = snapshot.SelfLink
+			vInfo.Status = storkapi.ApplicationBackupStatusSuccessful
+			vInfo.Reason = fmt.Sprintf("Backup successful for volume")
 		}
 	}
+
+	return backup.Status.Volumes, nil
+
+}
+
+// CancelBackup returns ErrNotSupported
+func (g *gcp) CancelBackup(*storkapi.ApplicationBackup) error {
+	//return &errors.ErrNotSupported{}
+	return nil
+}
+
+// DeleteBackup returns ErrNotSupported
+func (g *gcp) DeleteBackup(*storkapi.ApplicationBackup) error {
+	return nil
+	//return &errors.ErrNotSupported{}
+}
+
+func (g *gcp) UpdateMigratedPersistentVolumeSpec(
+	object runtime.Unstructured,
+) (runtime.Unstructured, error) {
+	metadata, err := meta.Accessor(object)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get access to the csi section of the PV
+	_, found, err := unstructured.NestedString(object.UnstructuredContent(), "spec", "csi", "driver")
+	if err != nil {
+		return nil, err
+	}
+
+	// Determine if CSI is used
+	if found {
+		if err := unstructured.SetNestedField(object.UnstructuredContent(), metadata.GetName(), "spec", "csi", "volumeHandle"); err != nil {
+			return nil, err
+		}
+		return object, nil
+	}
+
+	// Fallback to in-tree driver in case CSI isn't found
+	err = unstructured.SetNestedField(object.UnstructuredContent(), metadata.GetName(), "spec", "gcePersistentDisk", "pdName")
+	if err != nil {
+		return nil, err
+	}
+	return object, nil
+}
+
+func (g *gcp) generatePVName() string {
+	return pvNamePrefix + string(uuid.NewUUID())
+}
+
+// StartRestore returns ErrNotSupported
+func (g *gcp) StartRestore(
+	restore *storkapi.ApplicationRestore,
+	volumeBackupInfos []*storkapi.ApplicationBackupVolumeInfo,
+) ([]*storkapi.ApplicationRestoreVolumeInfo, error) {
+
+	volumeInfos := make([]*storkapi.ApplicationRestoreVolumeInfo, 0)
+	for _, backupVolumeInfo := range volumeBackupInfos {
+		volumeInfo := &storkapi.ApplicationRestoreVolumeInfo{}
+		volumeInfo.PersistentVolumeClaim = backupVolumeInfo.PersistentVolumeClaim
+		volumeInfo.SourceNamespace = backupVolumeInfo.Namespace
+		volumeInfo.SourceVolume = backupVolumeInfo.Volume
+		volumeInfo.RestoreVolume = g.generatePVName()
+		volumeInfos = append(volumeInfos, volumeInfo)
+		disk := &compute.Disk{
+
+			Name:           volumeInfo.RestoreVolume,
+			SourceSnapshot: backupVolumeInfo.BackupID,
+			Labels: map[string]string{
+				"created-by":           "stork",
+				"restore-uid":          string(restore.UID),
+				"source-pvc-name":      volumeInfo.PersistentVolumeClaim,
+				"source-pvc-namespace": volumeInfo.SourceNamespace,
+			},
+		}
+		_, err := g.service.Disks.Insert(g.projectID, g.zone, disk).Do()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return volumeInfos, nil
+}
+
+func (g *gcp) CancelRestore(*storkapi.ApplicationRestore) error {
+	//return &errors.ErrNotSupported{}
+	return nil
+}
+
+func (g *gcp) GetRestoreStatus(restore *storkapi.ApplicationRestore) ([]*storkapi.ApplicationRestoreVolumeInfo, error) {
+	for _, vInfo := range restore.Status.Volumes {
+		disk, err := g.service.Disks.Get(g.projectID, g.zone, vInfo.RestoreVolume).Do()
+		if err != nil {
+			return nil, err
+		}
+		switch disk.Status {
+		case "CREATING", "RESTORING":
+			vInfo.Status = storkapi.ApplicationRestoreStatusInProgress
+			vInfo.Reason = fmt.Sprintf("Volume restore in progress: %v", disk.Status)
+		case "DELETING", "FAILED":
+			vInfo.Status = storkapi.ApplicationRestoreStatusFailed
+			vInfo.Reason = fmt.Sprintf("Restore failed for volume: %v", disk.Status)
+		case "READY":
+			vInfo.Status = storkapi.ApplicationRestoreStatusSuccessful
+			vInfo.Reason = fmt.Sprintf("Restore successful for volume")
+		}
+	}
+
+	return restore.Status.Volumes, nil
 }
 
 func (g *gcp) InspectVolume(volumeID string) (*storkvolume.Info, error) {
@@ -164,7 +350,13 @@ func (g *gcp) GetVolumeClaimTemplates([]v1.PersistentVolumeClaim) (
 }
 
 func init() {
-	if err := storkvolume.Register(driverName, &gcp{}); err != nil {
+	g := &gcp{}
+	err := g.Init(nil)
+	if err != nil {
+		logrus.Errorf("Error init'ing gcp driver")
+		return
+	}
+	if err := storkvolume.Register(driverName, g); err != nil {
 		logrus.Panicf("Error registering gcp volume driver: %v", err)
 	}
 }
