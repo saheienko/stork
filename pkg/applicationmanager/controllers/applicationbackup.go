@@ -54,7 +54,6 @@ var backupCancelBackoff = wait.Backoff{
 
 // ApplicationBackupController reconciles applicationbackup objects
 type ApplicationBackupController struct {
-	Driver               volume.Driver
 	Recorder             record.EventRecorder
 	ResourceCollector    resourcecollector.ResourceCollector
 	backupAdminNamespace string
@@ -349,13 +348,9 @@ func (a *ApplicationBackupController) backupVolumes(backup *stork_api.Applicatio
 					string(stork_api.ApplicationBackupStatusFailed),
 					message)
 
-				err := a.Driver.CancelBackup(backup)
-				if err != nil {
-					log.ApplicationBackupLog(backup).Errorf("Error cancelling backups: %v", err)
-				}
-				backup.Status.Stage = stork_api.ApplicationBackupStageFinal
+				backup.Status.Stage = stork_api.ApplicationBackupStageCanceling
 				backup.Status.FinishTimestamp = metav1.Now()
-				backup.Status.Status = stork_api.ApplicationBackupStatusFailed
+				backup.Status.Status = stork_api.ApplicationBackupStatusInProgress
 				err = sdk.Update(backup)
 				if err != nil {
 					return err
@@ -462,7 +457,7 @@ func (a *ApplicationBackupController) backupVolumes(backup *stork_api.Applicatio
 
 			status, err := driver.GetBackupStatus(backup)
 			if err != nil {
-				return fmt.Errorf("error getting backup status for driver %v: %v", driver, err)
+				return fmt.Errorf("error getting backup status for driver %v: %v", driverName, err)
 			}
 			volumeInfos = append(volumeInfos, status...)
 		}
@@ -696,7 +691,11 @@ func (a *ApplicationBackupController) uploadMetadata(
 func (a *ApplicationBackupController) preparePVResource(
 	object runtime.Unstructured,
 ) error {
-	_, err := a.Driver.UpdateMigratedPersistentVolumeSpec(object)
+	driver, err := volume.GetPVDriver(object)
+	if err != nil {
+		return err
+	}
+	_, err := driver.UpdateMigratedPersistentVolumeSpec(object)
 	return err
 }
 

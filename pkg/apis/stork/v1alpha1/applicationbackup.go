@@ -107,6 +107,8 @@ const (
 	ApplicationBackupStageVolumes ApplicationBackupStageType = "Volumes"
 	// ApplicationBackupStageApplications for when applications are being backed up
 	ApplicationBackupStageApplications ApplicationBackupStageType = "Applications"
+	// ApplicationBackupStageApplications for when backups are being cancelled
+	ApplicationBackupStageCanceling ApplicationBackupStageType = "Canceling"
 	// ApplicationBackupStageFinal is the final stage for backup
 	ApplicationBackupStageFinal ApplicationBackupStageType = "Final"
 )

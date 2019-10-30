@@ -32,7 +32,6 @@ import (
 
 // ApplicationRestoreController reconciles applicationrestore objects
 type ApplicationRestoreController struct {
-	Driver                volume.Driver
 	Recorder              record.EventRecorder
 	ResourceCollector     resourcecollector.ResourceCollector
 	dynamicInterface      dynamic.Interface
@@ -190,6 +189,14 @@ func (a *ApplicationRestoreController) namespaceRestoreAllowed(restore *storkapi
 	return true
 }
 
+func (a *ApplicationRestoreController) getDriversForRestore(restore *storkapi.ApplicationRestore) map[string]bool {
+	drivers := make(map[string]bool)
+	for _, volumeInfo := range restore.Status.Volumes {
+		drivers[volumeInfo.DriverName] = true
+	}
+	return drivers
+}
+
 func (a *ApplicationRestoreController) restoreVolumes(restore *storkapi.ApplicationRestore) error {
 	restore.Status.Stage = storkapi.ApplicationRestoreStageVolumes
 	if restore.Status.Volumes == nil || len(restore.Status.Volumes) == 0 {
@@ -241,14 +248,23 @@ func (a *ApplicationRestoreController) restoreVolumes(restore *storkapi.Applicat
 	inProgress := false
 	// Skip checking status if no volumes are being restored
 	if len(restore.Status.Volumes) != 0 {
+		drivers := a.getDriversForRestore(restore)
+		volumeInfos := make([]*storkapi.ApplicationRestoreVolumeInfo, 0)
+
 		var err error
-		volumeInfos, err := a.Driver.GetRestoreStatus(restore)
-		if err != nil {
-			return err
+		for driverName := range drivers {
+			driver, err := volume.Get(driverName)
+			if err != nil {
+				return err
+			}
+
+			status, err := driver.GetRestoreStatus(restore)
+			if err != nil {
+				return fmt.Errorf("error getting restore status for driver %v: %v", driverName, err)
+			}
+			volumeInfos = append(volumeInfos, status...)
 		}
-		if volumeInfos == nil {
-			volumeInfos = make([]*storkapi.ApplicationRestoreVolumeInfo, 0)
-		}
+
 		restore.Status.Volumes = volumeInfos
 		// Store the new status
 		err = sdk.Update(restore)

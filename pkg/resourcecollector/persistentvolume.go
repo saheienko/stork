@@ -5,7 +5,6 @@ import (
 
 	"github.com/portworx/sched-ops/k8s"
 	"k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -79,15 +78,15 @@ func (r *ResourceCollector) preparePVResourceForApply(
 	var updatedName string
 	var present bool
 
-	metadata, err := meta.Accessor(object)
-	if err != nil {
-		return err
+	var pv v1.PersistentVolume
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(object.UnstructuredContent(), &pv); err != nil {
+		return fmt.Errorf("error converting to persistent volume: %v", err)
 	}
 
-	if updatedName, present = pvNameMappings[metadata.GetName()]; !present {
-		return fmt.Errorf("PV name mapping not found for %v", metadata.GetName())
+	if updatedName, present = pvNameMappings[pv.Name]; !present {
+		return fmt.Errorf("PV name mapping not found for %v", pv.Name)
 	}
-	metadata.SetName(updatedName)
-	_, err = r.Driver.UpdateMigratedPersistentVolumeSpec(object)
+	pv.Name = updatedName
+	_, err := r.Driver.UpdateMigratedPersistentVolumeSpec(&pv)
 	return err
 }
