@@ -45,6 +45,9 @@ type Driver interface {
 	// OwnsPVC returns true if the PVC is owned by the driver
 	OwnsPVC(pvc *v1.PersistentVolumeClaim) bool
 
+	// OwnsPV returns true if the PV is owned by the driver
+	OwnsPV(pvc *v1.PersistentVolume) bool
+
 	// GetSnapshotPlugin Get the snapshot plugin to be used for the driver
 	GetSnapshotPlugin() snapshotVolume.Plugin
 
@@ -109,7 +112,7 @@ type MigratePluginInterface interface {
 	CancelMigration(*storkapi.Migration) error
 	// Update the PVC spec to point to the migrated volume on the destination
 	// cluster
-	UpdateMigratedPersistentVolumeSpec(object runtime.Unstructured) (runtime.Unstructured, error)
+	UpdateMigratedPersistentVolumeSpec(*v1.PersistentVolume) (*v1.PersistentVolume, error)
 }
 
 // ClusterDomainsPluginInterface Interface to manage cluster domains
@@ -254,6 +257,19 @@ func GetPVCDriver(pvc *v1.PersistentVolumeClaim) (string, error) {
 	}
 }
 
+func GetPVDriver(pv *v1.PersistentVolume) (string, error) {
+	for driverName, d := range volDrivers {
+		if d.OwnsPV(pv) {
+			return driverName, nil
+		}
+	}
+	return "", &errors.ErrNotFound{
+		ID:   pv.Name,
+		Type: "VolumeDriver",
+	}
+}
+
+// ClusterPairNotSupported to be used by drivers that don't support pairing
 // ClusterPairNotSupported to be used by drivers that don't support pairing
 type ClusterPairNotSupported struct{}
 

@@ -566,17 +566,29 @@ func (p *portworx) OwnsPVC(pvc *v1.PersistentVolumeClaim) bool {
 			logrus.Warnf("Error getting pv %v for pvc %v: %v", pvc.Spec.VolumeName, pvc.Name, err)
 			return false
 		}
-		// Check the annotation in the PV for the provisioner
-		if val, ok := pv.Annotations[pvProvisionedByAnnotation]; ok {
-			provisioner = val
-		} else {
-			// Finally check the volume reference in the spec
-			if pv.Spec.PortworxVolume != nil {
-				return true
-			}
-		}
+		return p.OwnsPV(pv)
 	}
 
+	if provisioner != provisionerName &&
+		!isCsiProvisioner(provisioner) &&
+		provisioner != snapshot.GetProvisionerName() {
+		logrus.Debugf("Provisioner in Storageclass not Portworx or from the snapshot Provisioner: %v", provisioner)
+		return false
+	}
+	return true
+}
+
+func (p *portworx) OwnsPV(pv *v1.PersistentVolume) bool {
+	var provisioner string
+	// Check the annotation in the PV for the provisioner
+	if val, ok := pv.Annotations[pvProvisionedByAnnotation]; ok {
+		provisioner = val
+	} else {
+		// Finally check the volume reference in the spec
+		if pv.Spec.PortworxVolume != nil {
+			return true
+		}
+	}
 	if provisioner != provisionerName &&
 		!isCsiProvisioner(provisioner) &&
 		provisioner != snapshot.GetProvisionerName() {

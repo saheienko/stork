@@ -15,12 +15,9 @@ import (
 	"github.com/sirupsen/logrus"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
-	"google.golang.org/api/compute/v1"
+	compute "google.golang.org/api/compute/v1"
 	"google.golang.org/api/option"
 	"k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	k8shelper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
 )
@@ -112,17 +109,28 @@ func (g *gcp) OwnsPVC(pvc *v1.PersistentVolumeClaim) bool {
 			logrus.Warnf("Error getting pv %v for pvc %v: %v", pvc.Spec.VolumeName, pvc.Name, err)
 			return false
 		}
-		// Check the annotation in the PV for the provisioner
-		if val, ok := pv.Annotations[pvProvisionedByAnnotation]; ok {
-			provisioner = val
-		} else {
-			// Finally check the volume reference in the spec
-			if pv.Spec.GCEPersistentDisk != nil {
-				return true
-			}
-		}
+		return g.OwnsPV(pv)
 	}
 
+	if provisioner != provisionerName &&
+		!isCsiProvisioner(provisioner) {
+		logrus.Debugf("Provisioner in Storageclass not GCE: %v", provisioner)
+		return false
+	}
+	return true
+}
+
+func (g *gcp) OwnsPV(pv *v1.PersistentVolume) bool {
+	var provisioner string
+	// Check the annotation in the PV for the provisioner
+	if val, ok := pv.Annotations[pvProvisionedByAnnotation]; ok {
+		provisioner = val
+	} else {
+		// Finally check the volume reference in the spec
+		if pv.Spec.GCEPersistentDisk != nil {
+			return true
+		}
+	}
 	if provisioner != provisionerName &&
 		!isCsiProvisioner(provisioner) {
 		logrus.Debugf("Provisioner in Storageclass not GCE: %v", provisioner)
@@ -159,7 +167,8 @@ func (g *gcp) StartBackup(backup *storkapi.ApplicationBackup,
 		if err != nil {
 			return nil, fmt.Errorf("Error getting pv %v: %v", pvName, err)
 		}
-		volume := pv.Spec.GCEPersistentDisk.PDName
+		volume := pvc.Spec.VolumeName
+		pdName := pv.Spec.GCEPersistentDisk.PDName
 		volumeInfo.Volume = volume
 		snapshot := &compute.Snapshot{
 			Name: "stork-snapshot-" + string(uuid.NewUUID()),
@@ -170,7 +179,7 @@ func (g *gcp) StartBackup(backup *storkapi.ApplicationBackup,
 				"source-pvc-namespace": pvc.Namespace,
 			},
 		}
-		snapshotCall := g.service.Disks.CreateSnapshot(g.projectID, g.zone, volume, snapshot)
+		snapshotCall := g.service.Disks.CreateSnapshot(g.projectID, g.zone, pdName, snapshot)
 
 		// Set the Request ID to the unique name to get idempotency
 		//snapshotCall = snapshotCall.RequestId(snapshot.Name)
@@ -227,33 +236,15 @@ func (g *gcp) DeleteBackup(*storkapi.ApplicationBackup) error {
 }
 
 func (g *gcp) UpdateMigratedPersistentVolumeSpec(
-	object runtime.Unstructured,
-) (runtime.Unstructured, error) {
-	metadata, err := meta.Accessor(object)
-	if err != nil {
-		return nil, err
+	pv *v1.PersistentVolume,
+) (*v1.PersistentVolume, error) {
+	if pv.Spec.CSI != nil {
+		pv.Spec.CSI.VolumeHandle = pv.Name
+		return pv, nil
 	}
 
-	// Get access to the csi section of the PV
-	_, found, err := unstructured.NestedString(object.UnstructuredContent(), "spec", "csi", "driver")
-	if err != nil {
-		return nil, err
-	}
-
-	// Determine if CSI is used
-	if found {
-		if err := unstructured.SetNestedField(object.UnstructuredContent(), metadata.GetName(), "spec", "csi", "volumeHandle"); err != nil {
-			return nil, err
-		}
-		return object, nil
-	}
-
-	// Fallback to in-tree driver in case CSI isn't found
-	err = unstructured.SetNestedField(object.UnstructuredContent(), metadata.GetName(), "spec", "gcePersistentDisk", "pdName")
-	if err != nil {
-		return nil, err
-	}
-	return object, nil
+	pv.Spec.GCEPersistentDisk.PDName = pv.Name
+	return pv, nil
 }
 
 func (g *gcp) generatePVName() string {
