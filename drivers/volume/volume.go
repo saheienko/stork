@@ -129,7 +129,7 @@ type ClusterDomainsPluginInterface interface {
 type BackupRestorePluginInterface interface {
 	// Start backup of volumes specified by the spec. Should only backup
 	// volumes, not the specs associated with them
-	StartBackup(*storkapi.ApplicationBackup, []*v1.PersistentVolumeClaim) ([]*storkapi.ApplicationBackupVolumeInfo, error)
+	StartBackup(*storkapi.ApplicationBackup, []v1.PersistentVolumeClaim) ([]*storkapi.ApplicationBackupVolumeInfo, error)
 	// Get the status of backup of the volumes specified in the status
 	// for the backup spec
 	GetBackupStatus(*storkapi.ApplicationBackup) ([]*storkapi.ApplicationBackupVolumeInfo, error)

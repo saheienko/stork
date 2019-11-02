@@ -144,7 +144,7 @@ func isCsiProvisioner(provisioner string) bool {
 }
 
 func (g *gcp) StartBackup(backup *storkapi.ApplicationBackup,
-	pvcs []*v1.PersistentVolumeClaim,
+	pvcs []v1.PersistentVolumeClaim,
 ) ([]*storkapi.ApplicationBackupVolumeInfo, error) {
 	volumeInfos := make([]*storkapi.ApplicationBackupVolumeInfo, 0)
 
@@ -159,7 +159,7 @@ func (g *gcp) StartBackup(backup *storkapi.ApplicationBackup,
 		volumeInfo.DriverName = driverName
 		volumeInfos = append(volumeInfos, volumeInfo)
 
-		pvName, err := k8s.Instance().GetVolumeForPersistentVolumeClaim(pvc)
+		pvName, err := k8s.Instance().GetVolumeForPersistentVolumeClaim(&pvc)
 		if err != nil {
 			return nil, fmt.Errorf("Error getting PV name for PVC (%v/%v): %v", pvc.Namespace, pvc.Name, err)
 		}
@@ -194,7 +194,12 @@ func (g *gcp) StartBackup(backup *storkapi.ApplicationBackup,
 }
 
 func (g *gcp) GetBackupStatus(backup *storkapi.ApplicationBackup) ([]*storkapi.ApplicationBackupVolumeInfo, error) {
+	volumeInfos := make([]*storkapi.ApplicationBackupVolumeInfo, 0)
+
 	for _, vInfo := range backup.Status.Volumes {
+		if vInfo.DriverName != driverName {
+			continue
+		}
 		snapshot, err := g.service.Snapshots.Get(g.projectID, vInfo.BackupID).Do()
 		/*
 			filter := fmt.Sprintf("(labels.created-by=\"stork\") AND (labels.backup-uid=\"%v\") AND (labels.source-pvc-name=\"%v\") AND (labels.source-pvc-namespace=\"%v\")",
@@ -217,9 +222,10 @@ func (g *gcp) GetBackupStatus(backup *storkapi.ApplicationBackup) ([]*storkapi.A
 			vInfo.Status = storkapi.ApplicationBackupStatusSuccessful
 			vInfo.Reason = fmt.Sprintf("Backup successful for volume")
 		}
+		volumeInfos = append(volumeInfos, vInfo)
 	}
 
-	return backup.Status.Volumes, nil
+	return volumeInfos, nil
 
 }
 
@@ -264,6 +270,7 @@ func (g *gcp) StartRestore(
 		volumeInfo.SourceNamespace = backupVolumeInfo.Namespace
 		volumeInfo.SourceVolume = backupVolumeInfo.Volume
 		volumeInfo.RestoreVolume = g.generatePVName()
+		volumeInfo.DriverName = driverName
 		volumeInfos = append(volumeInfos, volumeInfo)
 		disk := &compute.Disk{
 
@@ -290,7 +297,11 @@ func (g *gcp) CancelRestore(*storkapi.ApplicationRestore) error {
 }
 
 func (g *gcp) GetRestoreStatus(restore *storkapi.ApplicationRestore) ([]*storkapi.ApplicationRestoreVolumeInfo, error) {
+	volumeInfos := make([]*storkapi.ApplicationRestoreVolumeInfo, 0)
 	for _, vInfo := range restore.Status.Volumes {
+		if vInfo.DriverName != driverName {
+			continue
+		}
 		disk, err := g.service.Disks.Get(g.projectID, g.zone, vInfo.RestoreVolume).Do()
 		if err != nil {
 			return nil, err
@@ -306,9 +317,10 @@ func (g *gcp) GetRestoreStatus(restore *storkapi.ApplicationRestore) ([]*storkap
 			vInfo.Status = storkapi.ApplicationRestoreStatusSuccessful
 			vInfo.Reason = fmt.Sprintf("Restore successful for volume")
 		}
+		volumeInfos = append(volumeInfos, vInfo)
 	}
 
-	return restore.Status.Volumes, nil
+	return volumeInfos, nil
 }
 
 func (g *gcp) InspectVolume(volumeID string) (*storkvolume.Info, error) {
