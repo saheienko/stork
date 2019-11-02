@@ -3,6 +3,7 @@ package resourcecollector
 import (
 	"fmt"
 
+	"github.com/libopenstorage/stork/drivers/volume"
 	"github.com/portworx/sched-ops/k8s"
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -41,9 +42,11 @@ func (r *ResourceCollector) pvToBeCollected(
 			return false, err
 		}
 		// Collect only if the PVC bound to the PV is owned by the driver
-		if !r.Driver.OwnsPVC(pvc) {
-			return false, nil
-		}
+		/*
+			if !r.Driver.OwnsPVC(pvc) {
+				return false, nil
+			}
+		*/
 
 		// Also check the labels on the PVC since the PV doesn't inherit the labels
 		if len(pvc.Labels) == 0 && len(labelSelectors) > 0 {
@@ -87,6 +90,20 @@ func (r *ResourceCollector) preparePVResourceForApply(
 		return fmt.Errorf("PV name mapping not found for %v", pv.Name)
 	}
 	pv.Name = updatedName
-	_, err := r.Driver.UpdateMigratedPersistentVolumeSpec(&pv)
+	driverName, err := volume.GetPVDriver(&pv)
+	if err != nil {
+		return err
+	}
+	driver, err := volume.Get(driverName)
+	if err != nil {
+		return err
+	}
+	_, err = driver.UpdateMigratedPersistentVolumeSpec(&pv)
+	o, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&pv)
+	if err != nil {
+		return err
+	}
+	object.SetUnstructuredContent(o)
+
 	return err
 }

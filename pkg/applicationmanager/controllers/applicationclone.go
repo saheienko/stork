@@ -477,7 +477,22 @@ func (a *ApplicationCloneController) prepareResources(
 func (a *ApplicationCloneController) preparePVResource(
 	object runtime.Unstructured,
 ) error {
-	_, err := a.Driver.UpdateMigratedPersistentVolumeSpec(object)
+	var pv v1.PersistentVolume
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(object.UnstructuredContent(), &pv); err != nil {
+		return err
+	}
+
+	_, err := a.Driver.UpdateMigratedPersistentVolumeSpec(&pv)
+	if err != nil {
+		return err
+	}
+
+	o, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&pv)
+	if err != nil {
+		return err
+	}
+	object.SetUnstructuredContent(o)
+
 	return err
 }
 

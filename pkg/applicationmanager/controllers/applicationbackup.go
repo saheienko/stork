@@ -276,7 +276,7 @@ func (a *ApplicationBackupController) backupVolumes(backup *stork_api.Applicatio
 
 	// Start backup of the volumes if we don't have any status stored
 	if backup.Status.Volumes == nil {
-		pvcMappings := make(map[string][]*v1.PersistentVolumeClaim)
+		pvcMappings := make(map[string][]v1.PersistentVolumeClaim)
 		backup.Status.Stage = stork_api.ApplicationBackupStageVolumes
 		backup.Status.Volumes = make([]*stork_api.ApplicationBackupVolumeInfo, 0)
 		for _, namespace := range backup.Spec.Namespaces {
@@ -290,14 +290,16 @@ func (a *ApplicationBackupController) backupVolumes(backup *stork_api.Applicatio
 				if err != nil {
 					return err
 				}
+				log.ApplicationBackupLog(backup).Errorf("PVC: %v Driver: %v", pvc.Name, driverName)
 				if driverName != "" {
 					if pvcMappings[driverName] == nil {
-						pvcMappings[driverName] = make([]*v1.PersistentVolumeClaim, 0)
+						pvcMappings[driverName] = make([]v1.PersistentVolumeClaim, 0)
 					}
-					pvcMappings[driverName] = append(pvcMappings[driverName], &pvc)
+					pvcMappings[driverName] = append(pvcMappings[driverName], pvc)
 				}
 			}
 		}
+		log.ApplicationBackupLog(backup).Errorf("PVCMappings: %v", pvcMappings)
 		for driverName, pvcs := range pvcMappings {
 			driver, err := volume.Get(driverName)
 			if err != nil {
@@ -691,11 +693,30 @@ func (a *ApplicationBackupController) uploadMetadata(
 func (a *ApplicationBackupController) preparePVResource(
 	object runtime.Unstructured,
 ) error {
-	driver, err := volume.GetPVDriver(object)
+	var pv v1.PersistentVolume
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(object.UnstructuredContent(), &pv); err != nil {
+		return err
+	}
+
+	driverName, err := volume.GetPVDriver(&pv)
 	if err != nil {
 		return err
 	}
-	_, err := driver.UpdateMigratedPersistentVolumeSpec(object)
+	driver, err := volume.Get(driverName)
+	if err != nil {
+		return err
+	}
+	_, err = driver.UpdateMigratedPersistentVolumeSpec(&pv)
+	if err != nil {
+		return err
+	}
+
+	o, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&pv)
+	if err != nil {
+		return err
+	}
+	object.SetUnstructuredContent(o)
+
 	return err
 }
 
@@ -783,15 +804,17 @@ func (a *ApplicationBackupController) deleteBackup(backup *stork_api.Application
 		return nil
 	}
 
-	// Ignore error when cancelling since completed ones could possibly not be
-	// cancelled
-	if err := a.Driver.CancelBackup(backup); err != nil {
-		log.ApplicationBackupLog(backup).Debugf("Error cancelling backup: %v", err)
-	}
+	/*
+		// Ignore error when cancelling since completed ones could possibly not be
+		// cancelled
+		if err := a.Driver.CancelBackup(backup); err != nil {
+			log.ApplicationBackupLog(backup).Debugf("Error cancelling backup: %v", err)
+		}
 
-	if err := a.Driver.DeleteBackup(backup); err != nil {
-		return err
-	}
+		if err := a.Driver.DeleteBackup(backup); err != nil {
+			return err
+		}
+	*/
 
 	backupLocation, err := k8s.Instance().GetBackupLocation(backup.Spec.BackupLocation, backup.Namespace)
 	if err != nil {

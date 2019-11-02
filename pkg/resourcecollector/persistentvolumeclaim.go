@@ -29,9 +29,11 @@ func (r *ResourceCollector) pvcToBeCollected(
 	}
 
 	// Don't collect PVCs not owned by the driver
-	if !r.Driver.OwnsPVC(pvc) {
-		return false, nil
-	}
+	/*
+		if !r.Driver.OwnsPVC(pvc) {
+			return false, nil
+		}
+	*/
 	return true, nil
 }
 

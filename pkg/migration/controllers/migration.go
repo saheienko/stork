@@ -752,15 +752,26 @@ func (m *MigrationController) preparePVResource(
 	migration *stork_api.Migration,
 	object runtime.Unstructured,
 ) error {
+	var pv v1.PersistentVolume
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(object.UnstructuredContent(), &pv); err != nil {
+		return err
+	}
 	// Set the reclaim policy to retain if the volumes are not being migrated
 	if migration.Spec.IncludeVolumes != nil && !*migration.Spec.IncludeVolumes {
-		err := unstructured.SetNestedField(object.UnstructuredContent(), string(v1.PersistentVolumeReclaimRetain), "spec", "persistentVolumeReclaimPolicy")
-		if err != nil {
-			return err
-		}
+		pv.Spec.PersistentVolumeReclaimPolicy = v1.PersistentVolumeReclaimRetain
 	}
-	_, err := m.Driver.UpdateMigratedPersistentVolumeSpec(object)
-	return err
+
+	_, err := m.Driver.UpdateMigratedPersistentVolumeSpec(&pv)
+	if err != nil {
+		return err
+	}
+	o, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&pv)
+	if err != nil {
+		return err
+	}
+	object.SetUnstructuredContent(o)
+
+	return nil
 }
 
 func (m *MigrationController) prepareApplicationResource(
