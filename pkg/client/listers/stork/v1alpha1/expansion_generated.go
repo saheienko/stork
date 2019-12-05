@@ -110,6 +110,14 @@ type RuleNamespaceListerExpansion interface{}
 // SchedulePolicyLister.
 type SchedulePolicyListerExpansion interface{}
 
+// VolumeImportListerExpansion allows custom methods to be added to
+// VolumeImportLister.
+type VolumeImportListerExpansion interface{}
+
+// VolumeImportNamespaceListerExpansion allows custom methods to be added to
+// VolumeImportNamespaceLister.
+type VolumeImportNamespaceListerExpansion interface{}
+
 // VolumeSnapshotRestoreListerExpansion allows custom methods to be added to
 // VolumeSnapshotRestoreLister.
 type VolumeSnapshotRestoreListerExpansion interface{}

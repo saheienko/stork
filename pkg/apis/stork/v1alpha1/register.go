@@ -61,6 +61,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&VolumeSnapshotRestoreList{},
 		&ApplicationBackupSchedule{},
 		&ApplicationBackupScheduleList{},
+		&VolumeImport{},
+		&VolumeImportList{},
 	)
 
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)

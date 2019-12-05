@@ -23,6 +23,7 @@ import (
 	"github.com/libopenstorage/stork/pkg/schedule"
 	"github.com/libopenstorage/stork/pkg/snapshot"
 	"github.com/libopenstorage/stork/pkg/version"
+	"github.com/libopenstorage/stork/pkg/volumeimport"
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 	api_v1 "k8s.io/api/core/v1"
@@ -134,6 +135,10 @@ func main() {
 		cli.BoolTFlag{
 			Name:  "pvc-watcher",
 			Usage: "Start the controller to monitor PVC creation and deletions (default: true)",
+		},
+		cli.BoolTFlag{
+			Name:  "volume-import-controller",
+			Usage: "Start the controller to monitor VolumeImport resources (default: true)",
 		},
 	}
 
@@ -349,6 +354,13 @@ func runStork(d volume.Driver, recorder record.EventRecorder, c *cli.Context) {
 		}
 		if err := clusterDomains.Init(); err != nil {
 			log.Fatalf("Error initializing cluster domain controllers: %v", err)
+		}
+	}
+
+	if c.Bool("volume-import-controller") {
+		vi := volumeimport.Controller{}
+		if err := vi.Init(); err != nil {
+			log.Fatalf("Error initializing volume-import controller: %v", err)
 		}
 	}
 
