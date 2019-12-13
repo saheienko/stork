@@ -4,6 +4,10 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func init() {
+	SchemeBuilder.Register(&VolumeSnapshotRestore{}, &VolumeSnapshotRestoreList{})
+}
+
 const (
 	// SnapshotRestoreResourceName is name for "volumesnapshotrestore" resource
 	SnapshotRestoreResourceName = "volumesnapshotrestore"

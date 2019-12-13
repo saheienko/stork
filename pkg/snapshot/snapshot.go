@@ -2,6 +2,7 @@ package snapshot
 
 import (
 	"fmt"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sync"
 
 	"github.com/kubernetes-incubator/external-storage/lib/controller"
@@ -40,7 +41,7 @@ func GetProvisionerName() string {
 }
 
 // Start initialize the snapshot components
-func (s *Snapshot) Start() error {
+func (s *Snapshot) Start(mgr manager.Manager) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -107,19 +108,14 @@ func (s *Snapshot) Start() error {
 	go s.provisioner.Run(s.stopChannel)
 
 	// Start the snapshot schedule controller
-	s.snapshotScheduleController = &controllers.SnapshotScheduleController{
-		Recorder: s.Recorder,
-	}
-	err = s.snapshotScheduleController.Init()
+	s.snapshotScheduleController = controllers.NewSnapshotScheduleController(mgr, s.Recorder)
+	err = s.snapshotScheduleController.Init(mgr)
 	if err != nil {
 		return fmt.Errorf("error initializing snapshot schedule controller: %v", err)
 	}
 
-	s.snapshotRestoreController = &controllers.SnapshotRestoreController{
-		Driver:   s.Driver,
-		Recorder: s.Recorder,
-	}
-	err = s.snapshotRestoreController.Init()
+	s.snapshotRestoreController = controllers.NewSnapshotRestoreController(mgr, s.Driver, s.Recorder)
+	err = s.snapshotRestoreController.Init(mgr)
 	if err != nil {
 		return fmt.Errorf("error initializing snapshot restore controller: %v", err)
 	}

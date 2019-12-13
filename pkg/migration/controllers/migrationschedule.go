@@ -8,19 +8,23 @@ import (
 	"time"
 
 	"github.com/libopenstorage/stork/drivers/volume"
-	"github.com/libopenstorage/stork/pkg/apis/stork"
 	stork_api "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/libopenstorage/stork/pkg/controller"
 	"github.com/libopenstorage/stork/pkg/log"
 	"github.com/libopenstorage/stork/pkg/schedule"
-	"github.com/operator-framework/operator-sdk/pkg/sdk"
 	"github.com/portworx/sched-ops/k8s"
+	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
+	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 const (
@@ -29,119 +33,148 @@ const (
 	domainsMaxRetries           = 5
 )
 
+func NewMigrationSchedule(mgr manager.Manager, d volume.Driver, r record.EventRecorder) *MigrationScheduleController {
+	return &MigrationScheduleController{
+		client:   mgr.GetClient(),
+		scheme:   mgr.GetScheme(),
+		Driver:   d,
+		Recorder: r,
+	}
+}
+
 // MigrationScheduleController reconciles MigrationSchedule objects
 type MigrationScheduleController struct {
+	client runtimeclient.Client
+	scheme *runtime.Scheme
+
 	Driver   volume.Driver
 	Recorder record.EventRecorder
 }
 
 // Init Initialize the migration schedule controller
-func (m *MigrationScheduleController) Init() error {
+func (m *MigrationScheduleController) Init(mgr manager.Manager) error {
 	err := m.createCRD()
 	if err != nil {
 		return err
 	}
-	return controller.Register(
-		&schema.GroupVersionKind{
-			Group:   stork.GroupName,
-			Version: stork_api.SchemeGroupVersion.Version,
-			Kind:    reflect.TypeOf(stork_api.MigrationSchedule{}).Name(),
-		},
-		"",
-		1*time.Minute,
-		m)
+
+	// Create a new controller
+	c, err := controller.New("migration-schedule-controller", mgr, controller.Options{Reconciler: m})
+	if err != nil {
+		return err
+	}
+
+	// Watch for changes to primary resource Migration
+	return c.Watch(&source.Kind{Type: &stork_api.ApplicationBackup{}}, &handler.EnqueueRequestForObject{})
 }
 
-// Handle updates for MigrationSchedule objects
-func (m *MigrationScheduleController) Handle(ctx context.Context, event sdk.Event) error {
-	switch o := event.Object.(type) {
-	case *stork_api.MigrationSchedule:
-		migrationSchedule := o
-		// Delete any migrations created by the schedule
-		if event.Deleted {
-			return m.deleteMigrations(migrationSchedule)
+func (m *MigrationScheduleController) Reconcile(request reconcile.Request) (reconcile.Result, error) {
+	logrus.Printf("Reconciling MigrationSchedule %s/%s", request.Namespace, request.Name)
+
+	// Fetch the ApplicationBackup instance
+	migrationSchedule := &stork_api.MigrationSchedule{}
+	err := m.client.Get(context.TODO(), request.NamespacedName, migrationSchedule)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Request object not found, could have been deleted after reconcile request.
+			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
+			// Return and don't requeue
+			return reconcile.Result{}, nil
+		}
+		// Error reading the object - requeue the request.
+		return reconcile.Result{}, err
+	}
+
+	return reconcile.Result{}, m.handle(context.TODO(), migrationSchedule)
+}
+
+func (m *MigrationScheduleController) handle(ctx context.Context, migrationSchedule *stork_api.MigrationSchedule) error {
+
+	// Delete any migrations created by the schedule
+	if migrationSchedule.DeletionTimestamp != nil {
+		return m.deleteMigrations(migrationSchedule)
+	}
+
+	// First update the status of any pending migrations
+	err := m.updateMigrationStatus(migrationSchedule)
+	if err != nil {
+		msg := fmt.Sprintf("Error updating migration status: %v", err)
+		m.Recorder.Event(migrationSchedule,
+			v1.EventTypeWarning,
+			string(stork_api.MigrationStatusFailed),
+			msg)
+		log.MigrationScheduleLog(migrationSchedule).Error(msg)
+		return err
+	}
+
+	// Then check if any of the policies require a trigger if it is enabled
+	if migrationSchedule.Spec.Suspend == nil || !*migrationSchedule.Spec.Suspend {
+		var err error
+		var clusterDomains *stork_api.ClusterDomains
+		for i := 0; i < domainsMaxRetries; i++ {
+			clusterDomains, err = m.Driver.GetClusterDomains()
+			if err == nil {
+				break
+			}
+			time.Sleep(domainsRetryInterval)
+		}
+		// Ignore errors
+		if err == nil {
+			for _, domainInfo := range clusterDomains.ClusterDomainInfos {
+				if domainInfo.Name == clusterDomains.LocalDomain &&
+					domainInfo.State == stork_api.ClusterDomainInactive {
+					suspend := true
+					migrationSchedule.Spec.Suspend = &suspend
+					msg := "Suspending migration schedule since local clusterdomain is inactive"
+					m.Recorder.Event(migrationSchedule,
+						v1.EventTypeWarning,
+						"Suspended",
+						msg)
+					log.MigrationScheduleLog(migrationSchedule).Warn(msg)
+					return m.client.Update(context.TODO(), migrationSchedule)
+				}
+			}
 		}
 
-		// First update the status of any pending migrations
-		err := m.updateMigrationStatus(migrationSchedule)
+		policyType, start, err := m.shouldStartMigration(migrationSchedule)
 		if err != nil {
-			msg := fmt.Sprintf("Error updating migration status: %v", err)
+			msg := fmt.Sprintf("Error checking if migration should be triggered: %v", err)
 			m.Recorder.Event(migrationSchedule,
 				v1.EventTypeWarning,
 				string(stork_api.MigrationStatusFailed),
 				msg)
 			log.MigrationScheduleLog(migrationSchedule).Error(msg)
-			return err
+			return nil
 		}
 
-		// Then check if any of the policies require a trigger if it is enabled
-		if migrationSchedule.Spec.Suspend == nil || !*migrationSchedule.Spec.Suspend {
-			var err error
-			var clusterDomains *stork_api.ClusterDomains
-			for i := 0; i < domainsMaxRetries; i++ {
-				clusterDomains, err = m.Driver.GetClusterDomains()
-				if err == nil {
-					break
-				}
-				time.Sleep(domainsRetryInterval)
-			}
-			// Ignore errors
-			if err == nil {
-				for _, domainInfo := range clusterDomains.ClusterDomainInfos {
-					if domainInfo.Name == clusterDomains.LocalDomain &&
-						domainInfo.State == stork_api.ClusterDomainInactive {
-						suspend := true
-						migrationSchedule.Spec.Suspend = &suspend
-						msg := "Suspending migration schedule since local clusterdomain is inactive"
-						m.Recorder.Event(migrationSchedule,
-							v1.EventTypeWarning,
-							"Suspended",
-							msg)
-						log.MigrationScheduleLog(migrationSchedule).Warn(msg)
-						return sdk.Update(migrationSchedule)
-					}
-				}
-			}
-
-			policyType, start, err := m.shouldStartMigration(migrationSchedule)
+		// Start a migration for a policy if required
+		if start {
+			err := m.startMigration(migrationSchedule, policyType)
 			if err != nil {
-				msg := fmt.Sprintf("Error checking if migration should be triggered: %v", err)
+				msg := fmt.Sprintf("Error triggering migration for schedule(%v): %v", policyType, err)
 				m.Recorder.Event(migrationSchedule,
 					v1.EventTypeWarning,
 					string(stork_api.MigrationStatusFailed),
 					msg)
 				log.MigrationScheduleLog(migrationSchedule).Error(msg)
-				return nil
+				return err
 			}
-
-			// Start a migration for a policy if required
-			if start {
-				err := m.startMigration(migrationSchedule, policyType)
-				if err != nil {
-					msg := fmt.Sprintf("Error triggering migration for schedule(%v): %v", policyType, err)
-					m.Recorder.Event(migrationSchedule,
-						v1.EventTypeWarning,
-						string(stork_api.MigrationStatusFailed),
-						msg)
-					log.MigrationScheduleLog(migrationSchedule).Error(msg)
-					return err
-				}
-			}
-		}
-
-		// Finally, prune any old migrations that were triggered for this
-		// schedule
-		err = m.pruneMigrations(migrationSchedule)
-		if err != nil {
-			msg := fmt.Sprintf("Error pruning old migrations: %v", err)
-			m.Recorder.Event(migrationSchedule,
-				v1.EventTypeWarning,
-				string(stork_api.MigrationStatusFailed),
-				msg)
-			log.MigrationScheduleLog(migrationSchedule).Error(msg)
-			return err
 		}
 	}
+
+	// Finally, prune any old migrations that were triggered for this
+	// schedule
+	err = m.pruneMigrations(migrationSchedule)
+	if err != nil {
+		msg := fmt.Sprintf("Error pruning old migrations: %v", err)
+		m.Recorder.Event(migrationSchedule,
+			v1.EventTypeWarning,
+			string(stork_api.MigrationStatusFailed),
+			msg)
+		log.MigrationScheduleLog(migrationSchedule).Error(msg)
+		return err
+	}
+
 	return nil
 }
 
@@ -188,7 +221,7 @@ func (m *MigrationScheduleController) updateMigrationStatus(migrationSchedule *s
 		}
 	}
 	if updated {
-		err := sdk.Update(migrationSchedule)
+		err := m.client.Update(context.TODO(), migrationSchedule)
 		if err != nil {
 			return err
 		}
@@ -274,7 +307,7 @@ func (m *MigrationScheduleController) startMigration(
 			CreationTimestamp: meta.NewTime(schedule.GetCurrentTime()),
 			Status:            stork_api.MigrationStatusPending,
 		})
-	err := sdk.Update(migrationSchedule)
+	err := m.client.Update(context.TODO(), migrationSchedule)
 	if err != nil {
 		return err
 	}
@@ -327,7 +360,7 @@ func (m *MigrationScheduleController) pruneMigrations(migrationSchedule *stork_a
 		}
 	}
 	if updated {
-		return sdk.Update(migrationSchedule)
+		return m.client.Update(context.TODO(), migrationSchedule)
 	}
 	return nil
 
@@ -351,7 +384,7 @@ func (m *MigrationScheduleController) createCRD() error {
 	resource := k8s.CustomResource{
 		Name:    stork_api.MigrationScheduleResourceName,
 		Plural:  stork_api.MigrationScheduleResourcePlural,
-		Group:   stork.GroupName,
+		Group:   stork_api.SchemeGroupVersion.Group,
 		Version: stork_api.SchemeGroupVersion.Version,
 		Scope:   apiextensionsv1beta1.NamespaceScoped,
 		Kind:    reflect.TypeOf(stork_api.MigrationSchedule{}).Name(),

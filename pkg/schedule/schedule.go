@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/libopenstorage/stork/pkg/apis/stork"
 	stork_api "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
 	"github.com/portworx/sched-ops/k8s"
 	"github.com/sirupsen/logrus"
@@ -368,7 +367,7 @@ func createCRD() error {
 	resource := k8s.CustomResource{
 		Name:    stork_api.SchedulePolicyResourceName,
 		Plural:  stork_api.SchedulePolicyResourcePlural,
-		Group:   stork.GroupName,
+		Group:   stork_api.SchemeGroupVersion.Group,
 		Version: stork_api.SchemeGroupVersion.Version,
 		Scope:   apiextensionsv1beta1.ClusterScoped,
 		Kind:    reflect.TypeOf(stork_api.SchedulePolicy{}).Name(),

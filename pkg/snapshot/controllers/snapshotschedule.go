@@ -8,19 +8,23 @@ import (
 	"time"
 
 	snapv1 "github.com/kubernetes-incubator/external-storage/snapshot/pkg/apis/crd/v1"
-	"github.com/libopenstorage/stork/pkg/apis/stork"
 	stork_api "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/libopenstorage/stork/pkg/controller"
 	"github.com/libopenstorage/stork/pkg/log"
 	"github.com/libopenstorage/stork/pkg/schedule"
-	"github.com/operator-framework/operator-sdk/pkg/sdk"
 	"github.com/portworx/sched-ops/k8s"
-	"k8s.io/api/core/v1"
+	"github.com/sirupsen/logrus"
+	v1 "k8s.io/api/core/v1"
 	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
+	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 const (
@@ -36,92 +40,120 @@ const (
 	SnapshotSchedulePolicyTypeAnnotation = "stork.libopenstorage.org/snapshotSchedulePolicyType"
 )
 
+func NewSnapshotScheduleController(mgr manager.Manager, r record.EventRecorder) *SnapshotScheduleController {
+	return &SnapshotScheduleController{
+		client:   mgr.GetClient(),
+		scheme:   mgr.GetScheme(),
+		Recorder: r,
+	}
+}
+
 // SnapshotScheduleController reconciles VolumeSnapshotSchedule objects
 type SnapshotScheduleController struct {
+	client runtimeclient.Client
+	scheme *runtime.Scheme
+
 	Recorder record.EventRecorder
 }
 
 // Init Initialize the snapshot schedule controller
-func (s *SnapshotScheduleController) Init() error {
+func (s *SnapshotScheduleController) Init(mgr manager.Manager) error {
 	err := s.createCRD()
 	if err != nil {
 		return err
 	}
-	return controller.Register(
-		&schema.GroupVersionKind{
-			Group:   stork.GroupName,
-			Version: stork_api.SchemeGroupVersion.Version,
-			Kind:    reflect.TypeOf(stork_api.VolumeSnapshotSchedule{}).Name(),
-		},
-		"",
-		1*time.Minute,
-		s)
+
+	// Create a new controller
+	c, err := controller.New("snapshot-schedule-controller", mgr, controller.Options{Reconciler: s})
+	if err != nil {
+		return err
+	}
+
+	// Watch for changes to primary resource Migration
+	return c.Watch(&source.Kind{Type: &stork_api.VolumeSnapshotSchedule{}}, &handler.EnqueueRequestForObject{})
+}
+
+func (c *SnapshotScheduleController) Reconcile(request reconcile.Request) (reconcile.Result, error) {
+	logrus.Printf("Reconciling VolumeSnapshotSchedule %s/%s", request.Namespace, request.Name)
+
+	// Fetch the ApplicationBackup instance
+	snapshotSchedule := &stork_api.VolumeSnapshotSchedule{}
+	err := c.client.Get(context.TODO(), request.NamespacedName, snapshotSchedule)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Request object not found, could have been deleted after reconcile request.
+			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
+			// Return and don't requeue
+			return reconcile.Result{}, nil
+		}
+		// Error reading the object - requeue the request.
+		return reconcile.Result{}, err
+	}
+
+	return reconcile.Result{}, c.handle(context.TODO(), snapshotSchedule)
 }
 
 // Handle updates for VolumeSnapshotSchedule objects
-func (s *SnapshotScheduleController) Handle(ctx context.Context, event sdk.Event) error {
-	switch o := event.Object.(type) {
-	case *stork_api.VolumeSnapshotSchedule:
-		snapshotSchedule := o
-		// Nothing to do for delete
-		if event.Deleted {
-			return nil
-		}
+func (s *SnapshotScheduleController) handle(ctx context.Context, snapshotSchedule *stork_api.VolumeSnapshotSchedule) error {
+	// Nothing to do for delete
+	if snapshotSchedule.DeletionTimestamp != nil {
+		return nil
+	}
 
-		s.setDefaults(snapshotSchedule)
-		// First update the status of any pending snapshots
-		err := s.updateVolumeSnapshotStatus(snapshotSchedule)
+	s.setDefaults(snapshotSchedule)
+	// First update the status of any pending snapshots
+	err := s.updateVolumeSnapshotStatus(snapshotSchedule)
+	if err != nil {
+		msg := fmt.Sprintf("Error updating snapshot status: %v", err)
+		s.Recorder.Event(snapshotSchedule,
+			v1.EventTypeWarning,
+			string(snapv1.VolumeSnapshotConditionError),
+			msg)
+		log.VolumeSnapshotScheduleLog(snapshotSchedule).Error(msg)
+		return err
+	}
+
+	if snapshotSchedule.Spec.Suspend == nil || !*snapshotSchedule.Spec.Suspend {
+		// Then check if any of the policies require a trigger
+		policyType, start, err := s.shouldStartVolumeSnapshot(snapshotSchedule)
 		if err != nil {
-			msg := fmt.Sprintf("Error updating snapshot status: %v", err)
+			msg := fmt.Sprintf("Error checking if snapshot should be triggered: %v", err)
 			s.Recorder.Event(snapshotSchedule,
 				v1.EventTypeWarning,
 				string(snapv1.VolumeSnapshotConditionError),
 				msg)
 			log.VolumeSnapshotScheduleLog(snapshotSchedule).Error(msg)
-			return err
+			return nil
 		}
 
-		if snapshotSchedule.Spec.Suspend == nil || !*snapshotSchedule.Spec.Suspend {
-			// Then check if any of the policies require a trigger
-			policyType, start, err := s.shouldStartVolumeSnapshot(snapshotSchedule)
+		// Start a snapshot for a policy if required
+		if start {
+			err := s.startVolumeSnapshot(snapshotSchedule, policyType)
 			if err != nil {
-				msg := fmt.Sprintf("Error checking if snapshot should be triggered: %v", err)
+				msg := fmt.Sprintf("Error triggering snapshot for schedule(%v): %v", policyType, err)
 				s.Recorder.Event(snapshotSchedule,
 					v1.EventTypeWarning,
 					string(snapv1.VolumeSnapshotConditionError),
 					msg)
 				log.VolumeSnapshotScheduleLog(snapshotSchedule).Error(msg)
-				return nil
+				return err
 			}
-
-			// Start a snapshot for a policy if required
-			if start {
-				err := s.startVolumeSnapshot(snapshotSchedule, policyType)
-				if err != nil {
-					msg := fmt.Sprintf("Error triggering snapshot for schedule(%v): %v", policyType, err)
-					s.Recorder.Event(snapshotSchedule,
-						v1.EventTypeWarning,
-						string(snapv1.VolumeSnapshotConditionError),
-						msg)
-					log.VolumeSnapshotScheduleLog(snapshotSchedule).Error(msg)
-					return err
-				}
-			}
-		}
-
-		// Finally, prune any old snapshots that were triggered for this
-		// schedule
-		err = s.pruneVolumeSnapshots(snapshotSchedule)
-		if err != nil {
-			msg := fmt.Sprintf("Error pruning old snapshots: %v", err)
-			s.Recorder.Event(snapshotSchedule,
-				v1.EventTypeWarning,
-				string(snapv1.VolumeSnapshotConditionError),
-				msg)
-			log.VolumeSnapshotScheduleLog(snapshotSchedule).Error(msg)
-			return err
 		}
 	}
+
+	// Finally, prune any old snapshots that were triggered for this
+	// schedule
+	err = s.pruneVolumeSnapshots(snapshotSchedule)
+	if err != nil {
+		msg := fmt.Sprintf("Error pruning old snapshots: %v", err)
+		s.Recorder.Event(snapshotSchedule,
+			v1.EventTypeWarning,
+			string(snapv1.VolumeSnapshotConditionError),
+			msg)
+		log.VolumeSnapshotScheduleLog(snapshotSchedule).Error(msg)
+		return err
+	}
+
 	return nil
 }
 
@@ -187,7 +219,7 @@ func (s *SnapshotScheduleController) updateVolumeSnapshotStatus(snapshotSchedule
 		}
 	}
 	if updated {
-		err := sdk.Update(snapshotSchedule)
+		err := s.client.Update(context.TODO(), snapshotSchedule)
 		if err != nil {
 			return err
 		}
@@ -255,7 +287,7 @@ func (s *SnapshotScheduleController) startVolumeSnapshot(snapshotSchedule *stork
 			CreationTimestamp: meta.NewTime(schedule.GetCurrentTime()),
 			Status:            snapv1.VolumeSnapshotConditionPending,
 		})
-	err := sdk.Update(snapshotSchedule)
+	err := s.client.Update(context.TODO(), snapshotSchedule)
 	if err != nil {
 		return err
 	}
@@ -333,14 +365,14 @@ func (s *SnapshotScheduleController) pruneVolumeSnapshots(snapshotSchedule *stor
 			snapshotSchedule.Status.Items[policyType] = append(failedDeletes, snapshotSchedule.Status.Items[policyType]...)
 		}
 	}
-	return sdk.Update(snapshotSchedule)
+	return s.client.Update(context.TODO(), snapshotSchedule)
 }
 
 func (s *SnapshotScheduleController) createCRD() error {
 	resource := k8s.CustomResource{
 		Name:    stork_api.VolumeSnapshotScheduleResourceName,
 		Plural:  stork_api.VolumeSnapshotScheduleResourcePlural,
-		Group:   stork.GroupName,
+		Group:   stork_api.SchemeGroupVersion.Group,
 		Version: stork_api.SchemeGroupVersion.Version,
 		Scope:   apiextensionsv1beta1.NamespaceScoped,
 		Kind:    reflect.TypeOf(stork_api.VolumeSnapshotSchedule{}).Name(),

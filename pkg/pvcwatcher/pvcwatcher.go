@@ -3,23 +3,26 @@ package pvcwatcher
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"strings"
-	"time"
 
 	snapv1 "github.com/kubernetes-incubator/external-storage/snapshot/pkg/apis/crd/v1"
 	"github.com/libopenstorage/stork/drivers/volume"
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/libopenstorage/stork/pkg/controller"
-	"github.com/operator-framework/operator-sdk/pkg/sdk"
 	"github.com/portworx/sched-ops/k8s"
+	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
-	"k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
 	k8shelper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
+	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 const (
@@ -28,8 +31,20 @@ const (
 	scheduleCreatedAnnotation              = annotationPrefix + "snapshot-schedule-created"
 )
 
+func New(mgr manager.Manager, d volume.Driver, r record.EventRecorder) *PVCWatcher {
+	return &PVCWatcher{
+		client:   mgr.GetClient(),
+		scheme:   mgr.GetScheme(),
+		Driver:   d,
+		Recorder: r,
+	}
+}
+
 // PVCWatcher watches for changes in PVCs
 type PVCWatcher struct {
+	client runtimeclient.Client
+	scheme *runtime.Scheme
+
 	Driver   volume.Driver
 	Recorder record.EventRecorder
 }
@@ -41,28 +56,35 @@ type policyInfo struct {
 }
 
 // Start Starts the controller to watch updates on PVCs
-func (p *PVCWatcher) Start() error {
-	return controller.Register(
-		&schema.GroupVersionKind{
-			Group:   v1.GroupName,
-			Version: v1.SchemeGroupVersion.Version,
-			Kind:    reflect.TypeOf(v1.PersistentVolumeClaim{}).Name(),
-		},
-		"",
-		1*time.Minute,
-		p)
+func (p *PVCWatcher) Start(mgr manager.Manager) error {
+	// Create a new controller
+	c, err := controller.New("pvc-watcher", mgr, controller.Options{Reconciler: p})
+	if err != nil {
+		return err
+	}
+
+	// Watch for changes to primary resource Migration
+	return c.Watch(&source.Kind{Type: &corev1.PersistentVolumeClaim{}}, &handler.EnqueueRequestForObject{})
 }
 
-// Handle updates for PVCs
-func (p *PVCWatcher) Handle(ctx context.Context, event sdk.Event) error {
-	switch o := event.Object.(type) {
-	case *v1.PersistentVolumeClaim:
-		err := p.handleSnapshotScheduleUpdates(o, event)
-		if err != nil {
-			return err
+func (p *PVCWatcher) Reconcile(request reconcile.Request) (reconcile.Result, error) {
+	logrus.Printf("Reconciling PVC %s/%s", request.Namespace, request.Name)
+
+	// Fetch the ApplicationBackup instance
+	pvc := &corev1.PersistentVolumeClaim{}
+	err := p.client.Get(context.TODO(), request.NamespacedName, pvc)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Request object not found, could have been deleted after reconcile request.
+			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
+			// Return and don't requeue
+			return reconcile.Result{}, nil
 		}
+		// Error reading the object - requeue the request.
+		return reconcile.Result{}, err
 	}
-	return nil
+
+	return reconcile.Result{}, p.handleSnapshotScheduleUpdates(pvc)
 }
 
 func getPoliciesFromMap(options map[string]string, scheduleNamePrefix string) (map[string]*policyInfo, error) {
@@ -85,14 +107,14 @@ func getPoliciesFromMap(options map[string]string, scheduleNamePrefix string) (m
 	return policyMap, nil
 }
 
-func (p *PVCWatcher) handleSnapshotScheduleUpdates(pvc *v1.PersistentVolumeClaim, event sdk.Event) error {
+func (p *PVCWatcher) handleSnapshotScheduleUpdates(pvc *corev1.PersistentVolumeClaim) error {
 	// Nothing to do for deletions
-	if event.Deleted {
+	if pvc.DeletionTimestamp != nil {
 		return nil
 	}
 
 	// Do nothing if the driver doesn't own the PVC or if it isn't bound yet
-	if !p.Driver.OwnsPVC(pvc) || pvc.Status.Phase != v1.ClaimBound {
+	if !p.Driver.OwnsPVC(pvc) || pvc.Status.Phase != corev1.ClaimBound {
 		return nil
 	}
 
@@ -153,13 +175,13 @@ func (p *PVCWatcher) handleSnapshotScheduleUpdates(pvc *v1.PersistentVolumeClaim
 		_, err = k8s.Instance().CreateSnapshotSchedule(snapshotSchedule)
 		if err != nil {
 			p.Recorder.Event(pvc,
-				v1.EventTypeWarning,
+				corev1.EventTypeWarning,
 				"Error",
 				fmt.Sprintf("Error creating snapshot schedule for PVC: %v", err))
 			return err
 		}
 		p.Recorder.Event(pvc,
-			v1.EventTypeNormal,
+			corev1.EventTypeNormal,
 			"Success",
 			fmt.Sprintf("Created volume snapshot schedule (%v) for PVC", snapshotScheduleName))
 	}

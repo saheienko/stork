@@ -9,6 +9,10 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+func init() {
+	SchemeBuilder.Register(&BackupLocation{}, &BackupLocationList{})
+}
+
 const (
 	// BackupLocationResourceName is name for "backuplocation" resource
 	BackupLocationResourceName = "backuplocation"

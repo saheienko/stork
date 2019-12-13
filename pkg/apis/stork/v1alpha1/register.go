@@ -1,73 +1,22 @@
 package v1alpha1
 
 import (
-	"github.com/libopenstorage/stork/pkg/apis/stork"
-	sdkK8sutil "github.com/operator-framework/operator-sdk/pkg/util/k8sutil"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
+	runtime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/runtime/scheme"
 )
-
-// SchemeGroupVersion is group version used to register these objects
-var SchemeGroupVersion = schema.GroupVersion{Group: stork.GroupName, Version: "v1alpha1"}
 
 var (
-	// SchemeBuilder is the scheme builder for the types
-	SchemeBuilder = runtime.NewSchemeBuilder(addKnownTypes)
-	// AddToScheme applies all the stored functions to the scheme
-	AddToScheme = SchemeBuilder.AddToScheme
+	// SchemeGroupVersion is group version used to register these objects
+	SchemeGroupVersion = schema.GroupVersion{Group: "stork.libopenstorage.org", Version: "v1alpha1"}
+
+	// SchemeBuilder is used to add go types to the GroupVersionKind scheme
+	SchemeBuilder = &scheme.Builder{GroupVersion: SchemeGroupVersion}
 )
 
-// Kind takes an unqualified kind and returns back a Group qualified GroupKind
-func Kind(kind string) schema.GroupKind {
-	return SchemeGroupVersion.WithKind(kind).GroupKind()
-}
+// +k8s:deepcopy-gen=package,register
+// +groupName=stork.libopenstorage.org
 
-// Resource takes an unqualified resource and returns a Group qualified GroupResource
-func Resource(resource string) schema.GroupResource {
-	return SchemeGroupVersion.WithResource(resource).GroupResource()
-}
-
-// Adds the list of known types to Scheme.
-func addKnownTypes(scheme *runtime.Scheme) error {
-	scheme.AddKnownTypes(SchemeGroupVersion,
-		&Rule{},
-		&RuleList{},
-		&ClusterPair{},
-		&ClusterPairList{},
-		&Migration{},
-		&MigrationList{},
-		&MigrationSchedule{},
-		&MigrationScheduleList{},
-		&GroupVolumeSnapshot{},
-		&GroupVolumeSnapshotList{},
-		&SchedulePolicy{},
-		&SchedulePolicyList{},
-		&VolumeSnapshotSchedule{},
-		&VolumeSnapshotScheduleList{},
-		&ClusterDomainsStatus{},
-		&ClusterDomainsStatusList{},
-		&ClusterDomainUpdate{},
-		&ClusterDomainUpdateList{},
-		&ApplicationClone{},
-		&ApplicationCloneList{},
-		&ApplicationBackup{},
-		&ApplicationBackupList{},
-		&ApplicationRestore{},
-		&ApplicationRestoreList{},
-		&BackupLocation{},
-		&BackupLocationList{},
-		&VolumeSnapshotRestore{},
-		&VolumeSnapshotRestoreList{},
-		&ApplicationBackupSchedule{},
-		&ApplicationBackupScheduleList{},
-	)
-
-	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
-	return nil
-}
-
-func init() {
-	SchemeBuilder.Register(addKnownTypes)
-	sdkK8sutil.AddToSDKScheme(AddToScheme)
+func AddToScheme(scheme *runtime.Scheme) {
+	SchemeBuilder.AddToScheme(scheme)
 }

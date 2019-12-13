@@ -5,6 +5,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func init() {
+	SchemeBuilder.Register(&ApplicationRestore{}, &ApplicationRestoreList{})
+}
+
 const (
 	// ApplicationRestoreResourceName is name for "applicationrestore" resource
 	ApplicationRestoreResourceName = "applicationrestore"

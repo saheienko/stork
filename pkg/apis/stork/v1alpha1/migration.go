@@ -4,6 +4,10 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func init() {
+	SchemeBuilder.Register(&Migration{}, &MigrationList{})
+}
+
 const (
 	// MigrationResourceName is name for "migration" resource
 	MigrationResourceName = "migration"
