@@ -1,9 +1,13 @@
 package v1alpha1
 
 import (
-	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/clientcmd/api"
 )
+
+func init() {
+	SchemeBuilder.Register(&ClusterPair{}, &ClusterPairList{})
+}
 
 const (
 	// ClusterPairResourceName is name for "clusterpair" resource
@@ -17,10 +21,10 @@ const (
 
 // ClusterPair represents pairing with other clusters
 type ClusterPair struct {
-	meta.TypeMeta   `json:",inline"`
-	meta.ObjectMeta `json:"metadata,omitempty"`
-	Spec            ClusterPairSpec   `json:"spec"`
-	Status          ClusterPairStatus `json:"status,omitempty"`
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Spec              ClusterPairSpec   `json:"spec"`
+	Status            ClusterPairStatus `json:"status,omitempty"`
 }
 
 // ClusterPairSpec is the spec to create the cluster pair
@@ -67,8 +71,8 @@ type ClusterPairStatus struct {
 
 // ClusterPairList is a list of cluster pairs
 type ClusterPairList struct {
-	meta.TypeMeta `json:",inline"`
-	meta.ListMeta `json:"metadata,omitempty"`
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
 
 	Items []ClusterPair `json:"items"`
 }

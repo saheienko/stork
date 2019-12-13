@@ -8,30 +8,46 @@ import (
 	"reflect"
 
 	"github.com/libopenstorage/stork/drivers/volume"
-	"github.com/libopenstorage/stork/pkg/apis/stork"
 	stork_api "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/libopenstorage/stork/pkg/controller"
 	"github.com/libopenstorage/stork/pkg/crypto"
 	"github.com/libopenstorage/stork/pkg/log"
 	"github.com/libopenstorage/stork/pkg/objectstore"
 	"github.com/libopenstorage/stork/pkg/resourcecollector"
-	"github.com/operator-framework/operator-sdk/pkg/sdk"
 	"github.com/portworx/sched-ops/k8s"
-	"k8s.io/api/core/v1"
+	"github.com/sirupsen/logrus"
+	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
+	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 )
+
+func NewApplicationRestore(mgr manager.Manager, d volume.Driver, r record.EventRecorder, rc resourcecollector.ResourceCollector) *ApplicationRestoreController {
+	return &ApplicationRestoreController{
+		client:            mgr.GetClient(),
+		scheme:            mgr.GetScheme(),
+		Driver:            d,
+		Recorder:          r,
+		ResourceCollector: rc,
+	}
+}
 
 // ApplicationRestoreController reconciles applicationrestore objects
 type ApplicationRestoreController struct {
+	client runtimeclient.Client
+	scheme *runtime.Scheme
+
 	Driver                volume.Driver
 	Recorder              record.EventRecorder
 	ResourceCollector     resourcecollector.ResourceCollector
@@ -40,7 +56,7 @@ type ApplicationRestoreController struct {
 }
 
 // Init Initialize the application restore controller
-func (a *ApplicationRestoreController) Init(restoreAdminNamespace string) error {
+func (a *ApplicationRestoreController) Init(mgr manager.Manager, restoreAdminNamespace string) error {
 	err := a.createCRD()
 	if err != nil {
 		return err
@@ -58,15 +74,14 @@ func (a *ApplicationRestoreController) Init(restoreAdminNamespace string) error 
 		return err
 	}
 
-	return controller.Register(
-		&schema.GroupVersionKind{
-			Group:   stork.GroupName,
-			Version: stork_api.SchemeGroupVersion.Version,
-			Kind:    reflect.TypeOf(stork_api.ApplicationRestore{}).Name(),
-		},
-		"",
-		resyncPeriod,
-		a)
+	// Create a new controller
+	c, err := controller.New("application-restore-controller", mgr, controller.Options{Reconciler: a})
+	if err != nil {
+		return err
+	}
+
+	// Watch for changes to primary resource Migration
+	return c.Watch(&source.Kind{Type: &stork_api.ApplicationRestore{}}, &handler.EnqueueRequestForObject{})
 }
 
 func (a *ApplicationRestoreController) setDefaults(restore *stork_api.ApplicationRestore) error {
@@ -111,71 +126,89 @@ func (a *ApplicationRestoreController) verifyNamespaces(restore *stork_api.Appli
 	return nil
 }
 
-// Handle updates for ApplicationRestore objects
-func (a *ApplicationRestoreController) Handle(ctx context.Context, event sdk.Event) error {
-	switch o := event.Object.(type) {
-	case *stork_api.ApplicationRestore:
-		restore := o
-		if event.Deleted {
-			return a.Driver.CancelRestore(restore)
+func (a *ApplicationRestoreController) Reconcile(request reconcile.Request) (reconcile.Result, error) {
+	logrus.Printf("Reconciling ApplicationRestore %s/%s", request.Namespace, request.Name)
+
+	// Fetch the ApplicationBackup instance
+	restore := &stork_api.ApplicationRestore{}
+	err := a.client.Get(context.TODO(), request.NamespacedName, restore)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Request object not found, could have been deleted after reconcile request.
+			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
+			// Return and don't requeue
+			return reconcile.Result{}, nil
 		}
-
-		err := a.setDefaults(restore)
-		if err != nil {
-			log.ApplicationRestoreLog(restore).Errorf(err.Error())
-			a.Recorder.Event(restore,
-				v1.EventTypeWarning,
-				string(stork_api.ApplicationRestoreStatusFailed),
-				err.Error())
-			return nil
-		}
-
-		err = a.verifyNamespaces(restore)
-		if err != nil {
-			log.ApplicationRestoreLog(restore).Errorf(err.Error())
-			a.Recorder.Event(restore,
-				v1.EventTypeWarning,
-				string(stork_api.ApplicationRestoreStatusFailed),
-				err.Error())
-			return nil
-		}
-
-		var terminationChannels []chan bool
-
-		switch restore.Status.Stage {
-		case stork_api.ApplicationRestoreStageInitial:
-			// Make sure the namespaces exist
-			fallthrough
-		case stork_api.ApplicationRestoreStageVolumes:
-			err := a.restoreVolumes(restore, terminationChannels)
-			if err != nil {
-				message := fmt.Sprintf("Error restoring volumes: %v", err)
-				log.ApplicationRestoreLog(restore).Errorf(message)
-				a.Recorder.Event(restore,
-					v1.EventTypeWarning,
-					string(stork_api.ApplicationRestoreStatusFailed),
-					message)
-				return nil
-			}
-		case stork_api.ApplicationRestoreStageApplications:
-			err := a.restoreResources(restore)
-			if err != nil {
-				message := fmt.Sprintf("Error restoring resources: %v", err)
-				log.ApplicationRestoreLog(restore).Errorf(message)
-				a.Recorder.Event(restore,
-					v1.EventTypeWarning,
-					string(stork_api.ApplicationRestoreStatusFailed),
-					message)
-				return nil
-			}
-
-		case stork_api.ApplicationRestoreStageFinal:
-			// Do Nothing
-			return nil
-		default:
-			log.ApplicationRestoreLog(restore).Errorf("Invalid stage for restore: %v", restore.Status.Stage)
-		}
+		// Error reading the object - requeue the request.
+		return reconcile.Result{}, err
 	}
+
+	return reconcile.Result{}, a.handle(context.TODO(), restore)
+}
+
+// Handle updates for ApplicationRestore objects
+func (a *ApplicationRestoreController) handle(ctx context.Context, restore *stork_api.ApplicationRestore) error {
+	// TODO: use finalizers
+	if restore.DeletionTimestamp != nil {
+		return a.Driver.CancelRestore(restore)
+	}
+
+	err := a.setDefaults(restore)
+	if err != nil {
+		log.ApplicationRestoreLog(restore).Errorf(err.Error())
+		a.Recorder.Event(restore,
+			corev1.EventTypeWarning,
+			string(stork_api.ApplicationRestoreStatusFailed),
+			err.Error())
+		return nil
+	}
+
+	err = a.verifyNamespaces(restore)
+	if err != nil {
+		log.ApplicationRestoreLog(restore).Errorf(err.Error())
+		a.Recorder.Event(restore,
+			corev1.EventTypeWarning,
+			string(stork_api.ApplicationRestoreStatusFailed),
+			err.Error())
+		return nil
+	}
+
+	var terminationChannels []chan bool
+
+	switch restore.Status.Stage {
+	case stork_api.ApplicationRestoreStageInitial:
+		// Make sure the namespaces exist
+		fallthrough
+	case stork_api.ApplicationRestoreStageVolumes:
+		err := a.restoreVolumes(restore, terminationChannels)
+		if err != nil {
+			message := fmt.Sprintf("Error restoring volumes: %v", err)
+			log.ApplicationRestoreLog(restore).Errorf(message)
+			a.Recorder.Event(restore,
+				corev1.EventTypeWarning,
+				string(stork_api.ApplicationRestoreStatusFailed),
+				message)
+			return nil
+		}
+	case stork_api.ApplicationRestoreStageApplications:
+		err := a.restoreResources(restore)
+		if err != nil {
+			message := fmt.Sprintf("Error restoring resources: %v", err)
+			log.ApplicationRestoreLog(restore).Errorf(message)
+			a.Recorder.Event(restore,
+				corev1.EventTypeWarning,
+				string(stork_api.ApplicationRestoreStatusFailed),
+				message)
+			return nil
+		}
+
+	case stork_api.ApplicationRestoreStageFinal:
+		// Do Nothing
+		return nil
+	default:
+		log.ApplicationRestoreLog(restore).Errorf("Invalid stage for restore: %v", restore.Status.Stage)
+	}
+
 	return nil
 }
 
@@ -206,14 +239,14 @@ func (a *ApplicationRestoreController) restoreVolumes(restore *stork_api.Applica
 			message := fmt.Sprintf("Error starting Application Restore for volumes: %v", err)
 			log.ApplicationRestoreLog(restore).Errorf(message)
 			a.Recorder.Event(restore,
-				v1.EventTypeWarning,
+				corev1.EventTypeWarning,
 				string(stork_api.ApplicationRestoreStatusFailed),
 				message)
 			return nil
 		}
 		restore.Status.Volumes = volumeInfos
 		restore.Status.Status = stork_api.ApplicationRestoreStatusInProgress
-		err = sdk.Update(restore)
+		err = a.client.Update(context.TODO(), restore)
 		if err != nil {
 			return err
 		}
@@ -233,7 +266,7 @@ func (a *ApplicationRestoreController) restoreVolumes(restore *stork_api.Applica
 		}
 		restore.Status.Volumes = volumeInfos
 		// Store the new status
-		err = sdk.Update(restore)
+		err = a.client.Update(context.TODO(), restore)
 		if err != nil {
 			return err
 		}
@@ -247,7 +280,7 @@ func (a *ApplicationRestoreController) restoreVolumes(restore *stork_api.Applica
 				inProgress = true
 			} else if vInfo.Status == stork_api.ApplicationRestoreStatusFailed {
 				a.Recorder.Event(restore,
-					v1.EventTypeWarning,
+					corev1.EventTypeWarning,
 					string(vInfo.Status),
 					fmt.Sprintf("Error restoring volume %v->%v: %v", vInfo.SourceVolume, vInfo.RestoreVolume, vInfo.Reason))
 				restore.Status.Stage = stork_api.ApplicationRestoreStageFinal
@@ -256,7 +289,7 @@ func (a *ApplicationRestoreController) restoreVolumes(restore *stork_api.Applica
 				break
 			} else if vInfo.Status == stork_api.ApplicationRestoreStatusSuccessful {
 				a.Recorder.Event(restore,
-					v1.EventTypeNormal,
+					corev1.EventTypeNormal,
 					string(vInfo.Status),
 					fmt.Sprintf("Volume %v->%v restored successfully", vInfo.SourceVolume, vInfo.RestoreVolume))
 			}
@@ -273,7 +306,7 @@ func (a *ApplicationRestoreController) restoreVolumes(restore *stork_api.Applica
 		restore.Status.Stage = stork_api.ApplicationRestoreStageApplications
 		restore.Status.Status = stork_api.ApplicationRestoreStatusInProgress
 		// Update the current state and then move on to restoring resources
-		err := sdk.Update(restore)
+		err := a.client.Update(context.TODO(), restore)
 		if err != nil {
 			return err
 		}
@@ -284,7 +317,7 @@ func (a *ApplicationRestoreController) restoreVolumes(restore *stork_api.Applica
 		}
 	}
 
-	err := sdk.Update(restore)
+	err := a.client.Update(context.TODO(), restore)
 	if err != nil {
 		return err
 	}
@@ -379,9 +412,9 @@ func (a *ApplicationRestoreController) updateResourceStatus(
 
 	updatedResource.Status = status
 	updatedResource.Reason = reason
-	eventType := v1.EventTypeNormal
+	eventType := corev1.EventTypeNormal
 	if status == stork_api.ApplicationRestoreStatusFailed {
-		eventType = v1.EventTypeWarning
+		eventType = corev1.EventTypeWarning
 	}
 	eventMessage := fmt.Sprintf("%v %v/%v: %v",
 		gkv,
@@ -523,7 +556,7 @@ func (a *ApplicationRestoreController) restoreResources(
 		}
 	}
 
-	if err := sdk.Update(restore); err != nil {
+	if err := a.client.Update(context.TODO(), restore); err != nil {
 		return err
 	}
 
@@ -534,7 +567,7 @@ func (a *ApplicationRestoreController) createCRD() error {
 	resource := k8s.CustomResource{
 		Name:    stork_api.ApplicationRestoreResourceName,
 		Plural:  stork_api.ApplicationRestoreResourcePlural,
-		Group:   stork.GroupName,
+		Group:   stork_api.SchemeGroupVersion.Group,
 		Version: stork_api.SchemeGroupVersion.Version,
 		Scope:   apiextensionsv1beta1.NamespaceScoped,
 		Kind:    reflect.TypeOf(stork_api.ApplicationRestore{}).Name(),

@@ -2,6 +2,9 @@ package main
 
 import (
 	"flag"
+	"github.com/libopenstorage/stork/pkg/clusterdomains"
+	"github.com/libopenstorage/stork/pkg/migration"
+	"github.com/libopenstorage/stork/pkg/pvcwatcher"
 	"os"
 	"os/signal"
 	"syscall"
@@ -9,15 +12,11 @@ import (
 	"github.com/libopenstorage/stork/drivers/volume"
 	_ "github.com/libopenstorage/stork/drivers/volume/portworx"
 	"github.com/libopenstorage/stork/pkg/applicationmanager"
-	"github.com/libopenstorage/stork/pkg/clusterdomains"
-	"github.com/libopenstorage/stork/pkg/controller"
 	"github.com/libopenstorage/stork/pkg/dbg"
 	"github.com/libopenstorage/stork/pkg/extender"
 	"github.com/libopenstorage/stork/pkg/groupsnapshot"
 	"github.com/libopenstorage/stork/pkg/initializer"
-	"github.com/libopenstorage/stork/pkg/migration"
 	"github.com/libopenstorage/stork/pkg/monitor"
-	"github.com/libopenstorage/stork/pkg/pvcwatcher"
 	"github.com/libopenstorage/stork/pkg/resourcecollector"
 	"github.com/libopenstorage/stork/pkg/rule"
 	"github.com/libopenstorage/stork/pkg/schedule"
@@ -35,6 +34,8 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	componentconfig "k8s.io/kubernetes/pkg/apis/componentconfig/v1alpha1"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
 const (
@@ -249,8 +250,19 @@ func run(c *cli.Context) {
 func runStork(d volume.Driver, recorder record.EventRecorder, c *cli.Context) {
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
-	if err := controller.Init(); err != nil {
-		log.Fatalf("Error initializing controller: %v", err)
+
+	// Get a config to talk to the apiserver
+	cfg, err := config.GetConfig()
+	if err != nil {
+		log.Error(err)
+	}
+
+	// Create a new Cmd to provide shared dependencies and start components
+	mgr, err := manager.New(cfg, manager.Options{
+		//MapperProvider: restmapper.NewDynamicRESTMapper,
+	})
+	if err != nil {
+		log.Error(err)
 	}
 
 	if err := rule.Init(); err != nil {
@@ -286,7 +298,7 @@ func runStork(d volume.Driver, recorder record.EventRecorder, c *cli.Context) {
 		Recorder: recorder,
 	}
 	if c.Bool("snapshotter") {
-		if err := snapshot.Start(); err != nil {
+		if err := snapshot.Start(mgr); err != nil {
 			log.Fatalf("Error starting snapshot controller: %v", err)
 		}
 
@@ -294,16 +306,14 @@ func runStork(d volume.Driver, recorder record.EventRecorder, c *cli.Context) {
 			Driver:   d,
 			Recorder: recorder,
 		}
-		if err := groupsnapshotInst.Init(); err != nil {
+		if err := groupsnapshotInst.Init(mgr); err != nil {
 			log.Fatalf("Error initializing groupsnapshot controller: %v", err)
 		}
 	}
-	pvcWatcher := pvcwatcher.PVCWatcher{
-		Driver:   d,
-		Recorder: recorder,
-	}
+
+	pvcWatcher := pvcwatcher.New(mgr, d, recorder)
 	if c.Bool("pvc-watcher") {
-		if err := pvcWatcher.Start(); err != nil {
+		if err := pvcWatcher.Start(mgr); err != nil {
 			log.Fatalf("Error starting pvc watcher: %v", err)
 		}
 	}
@@ -326,7 +336,7 @@ func runStork(d volume.Driver, recorder record.EventRecorder, c *cli.Context) {
 			Recorder:          recorder,
 			ResourceCollector: resourceCollector,
 		}
-		if err := migration.Init(adminNamespace); err != nil {
+		if err := migration.Init(mgr, adminNamespace); err != nil {
 			log.Fatalf("Error initializing migration: %v", err)
 		}
 	}
@@ -337,7 +347,7 @@ func runStork(d volume.Driver, recorder record.EventRecorder, c *cli.Context) {
 			Recorder:          recorder,
 			ResourceCollector: resourceCollector,
 		}
-		if err := appManager.Init(adminNamespace, signalChan); err != nil {
+		if err := appManager.Init(mgr, adminNamespace, signalChan); err != nil {
 			log.Fatalf("Error initializing application manager: %v", err)
 		}
 	}
@@ -347,16 +357,13 @@ func runStork(d volume.Driver, recorder record.EventRecorder, c *cli.Context) {
 			Driver:   d,
 			Recorder: recorder,
 		}
-		if err := clusterDomains.Init(); err != nil {
+		if err := clusterDomains.Init(mgr); err != nil {
 			log.Fatalf("Error initializing cluster domain controllers: %v", err)
 		}
 	}
 
-	// The controller should be started at the end
-	err := controller.Run()
-	if err != nil {
-		log.Fatalf("Error starting controller: %v", err)
-	}
+	// TODO: setup termination, handle error.
+	go mgr.Start(nil)
 
 	for {
 		<-signalChan

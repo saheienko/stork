@@ -4,6 +4,10 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func init() {
+	SchemeBuilder.Register(&ClusterDomainsStatus{}, &ClusterDomainsStatusList{})
+}
+
 const (
 	// ClusterDomainsStatusResourceName is name for "clusterdomainsstatus" resource
 	ClusterDomainsStatusResourceName = "clusterdomainsstatus"

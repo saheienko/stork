@@ -1,5 +1,2 @@
-// +k8s:deepcopy-gen=package,register
-
-// Package v1alpha1 is the v1alpha1 version of the API.
-// +groupName=stork.libopenstorage.org
+// Package v1alpha1 contains API Schema definitions for the stork v1alpha1 API group
 package v1alpha1
