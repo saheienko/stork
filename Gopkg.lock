@@ -158,14 +158,6 @@
   version = "v2.0.0"
 
 [[projects]]
-  digest = "1:7335a115a551d88df60eb5664ecee74d59f29f9591d30bdadc4c63f20e04c003"
-  name = "github.com/coreos/prometheus-operator"
-  packages = ["pkg/client/monitoring/v1"]
-  pruneopts = "NT"
-  revision = "82a6ad2071ff653e38b3b4719ecb789d73f3ab05"
-  version = "v0.25.0"
-
-[[projects]]
   digest = "1:4b8b5811da6970495e04d1f4e98bb89518cc3cfc3b3f456bdb876ed7b6c74049"
   name = "github.com/davecgh/go-spew"
   packages = ["spew"]
@@ -754,17 +746,6 @@
   ]
   pruneopts = "NT"
   revision = "431ec9a26e5021f35fa41ee9a89842db9bfdb370"
-
-[[projects]]
-  digest = "1:ee01ef8a6bac37c704936dfd61a59421a1a5e26b3f9f2c669c5eeb41dde9c5ca"
-  name = "github.com/operator-framework/operator-sdk"
-  packages = [
-    "pkg/k8sutil",
-    "pkg/sdk",
-  ]
-  pruneopts = "NT"
-  revision = "ec5387ceebfe7a33b53fd49711d294d93c0fb264"
-  version = "v0.1.0"
 
 [[projects]]
   digest = "1:93b1d84c5fa6d1ea52f4114c37714cddd84d5b78f151b62bb101128dd51399bf"
@@ -1518,7 +1499,6 @@
   digest = "1:1689a49a3ebc6e379849181f1e0899fccf143cab47586078721818bdcdb712bc"
   name = "k8s.io/client-go"
   packages = [
-    "deprecated-dynamic",
     "discovery",
     "discovery/fake",
     "dynamic",
@@ -1887,7 +1867,6 @@
     "pkg/client/apiutil",
     "pkg/client/config",
     "pkg/controller",
-    "pkg/controller/controllerutil",
     "pkg/event",
     "pkg/handler",
     "pkg/internal/controller",
@@ -1949,7 +1928,6 @@
     "github.com/libopenstorage/openstorage/volume",
     "github.com/openshift/api/apps/v1",
     "github.com/openshift/client-go/apps/clientset/versioned/fake",
-    "github.com/operator-framework/operator-sdk/pkg/sdk",
     "github.com/pborman/uuid",
     "github.com/portworx/sched-ops/k8s",
     "github.com/portworx/sched-ops/task",
@@ -2045,7 +2023,6 @@
     "sigs.k8s.io/controller-runtime/pkg/client",
     "sigs.k8s.io/controller-runtime/pkg/client/config",
     "sigs.k8s.io/controller-runtime/pkg/controller",
-    "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil",
     "sigs.k8s.io/controller-runtime/pkg/handler",
     "sigs.k8s.io/controller-runtime/pkg/manager",
     "sigs.k8s.io/controller-runtime/pkg/reconcile",
