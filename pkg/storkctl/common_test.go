@@ -20,7 +20,7 @@ import (
 	"k8s.io/client-go/rest/fake"
 	"k8s.io/kubernetes/pkg/apis/core/v1"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-	"k8s.io/kubernetes/pkg/kubectl/genericclioptions"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
 )
 
 var codec runtime.Codec

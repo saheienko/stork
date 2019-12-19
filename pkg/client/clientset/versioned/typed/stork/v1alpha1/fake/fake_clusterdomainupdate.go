@@ -33,9 +33,9 @@ type FakeClusterDomainUpdates struct {
 	Fake *FakeStorkV1alpha1
 }
 
-var clusterdomainupdatesResource = schema.GroupVersionResource{Group: "stork.libopenstorage.org", Version: "v1alpha1", Resource: "clusterdomainupdates"}
+var clusterdomainupdatesResource = schema.GroupVersionResource{Group: "stork", Version: "v1alpha1", Resource: "clusterdomainupdates"}
 
-var clusterdomainupdatesKind = schema.GroupVersionKind{Group: "stork.libopenstorage.org", Version: "v1alpha1", Kind: "ClusterDomainUpdate"}
+var clusterdomainupdatesKind = schema.GroupVersionKind{Group: "stork", Version: "v1alpha1", Kind: "ClusterDomainUpdate"}
 
 // Get takes name of the clusterDomainUpdate, and returns the corresponding clusterDomainUpdate object, and an error if there is any.
 func (c *FakeClusterDomainUpdates) Get(name string, options v1.GetOptions) (result *v1alpha1.ClusterDomainUpdate, err error) {

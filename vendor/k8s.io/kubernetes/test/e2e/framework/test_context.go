@@ -31,7 +31,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/kubernetes/pkg/cloudprovider"
-	"k8s.io/kubernetes/pkg/kubelet/apis/kubeletconfig"
+	kubeletconfig "k8s.io/kubernetes/pkg/kubelet/apis/config"
 	"k8s.io/kubernetes/pkg/kubemark"
 )
 
@@ -99,6 +99,8 @@ type TestContextType struct {
 	OutputPrintType string
 	// NodeSchedulableTimeout is the timeout for waiting for all nodes to be schedulable.
 	NodeSchedulableTimeout time.Duration
+	// SystemDaemonsetStartupTimeout is the timeout for waiting for all system daemonsets to be ready.
+	SystemDaemonsetStartupTimeout time.Duration
 	// CreateTestingNS is responsible for creating namespace used for executing e2e tests.
 	// It accepts namespace base name, which will be prepended with e2e prefix, kube client
 	// and labels to be applied to a namespace.
@@ -160,8 +162,6 @@ type NodeTestContextType struct {
 	// the node e2e test. If empty, the default one (system.DefaultSpec) is
 	// used. The system specs are in test/e2e_node/system/specs/.
 	SystemSpecName string
-	// ExtraEnvs is a map of environment names to values.
-	ExtraEnvs map[string]string
 }
 
 // StorageConfig contains the shared settings for storage 2e2 tests.
@@ -279,6 +279,7 @@ func RegisterClusterFlags() {
 	flag.IntVar(&TestContext.MinStartupPods, "minStartupPods", 0, "The number of pods which we need to see in 'Running' state with a 'Ready' condition of true, before we try running tests. This is useful in any cluster which needs some base pod-based services running before it can be used.")
 	flag.DurationVar(&TestContext.SystemPodsStartupTimeout, "system-pods-startup-timeout", 10*time.Minute, "Timeout for waiting for all system pods to be running before starting tests.")
 	flag.DurationVar(&TestContext.NodeSchedulableTimeout, "node-schedulable-timeout", 30*time.Minute, "Timeout for waiting for all nodes to be schedulable.")
+	flag.DurationVar(&TestContext.SystemDaemonsetStartupTimeout, "system-daemonsets-startup-timeout", 5*time.Minute, "Timeout for waiting for all system daemonsets to be ready.")
 	flag.StringVar(&TestContext.UpgradeTarget, "upgrade-target", "ci/latest", "Version to upgrade to (e.g. 'release/stable', 'release/latest', 'ci/latest', '0.19.1', '0.19.1-669-gabac8c8') if doing an upgrade test.")
 	flag.StringVar(&TestContext.EtcdUpgradeStorage, "etcd-upgrade-storage", "", "The storage version to upgrade to (either 'etcdv2' or 'etcdv3') if doing an etcd upgrade test.")
 	flag.StringVar(&TestContext.EtcdUpgradeVersion, "etcd-upgrade-version", "", "The etcd binary version to upgrade to (e.g., '3.0.14', '2.3.7') if doing an etcd upgrade test.")
@@ -303,7 +304,6 @@ func RegisterNodeFlags() {
 	flag.BoolVar(&TestContext.PrepullImages, "prepull-images", true, "If true, prepull images so image pull failures do not cause test failures.")
 	flag.StringVar(&TestContext.ImageDescription, "image-description", "", "The description of the image which the test will be running on.")
 	flag.StringVar(&TestContext.SystemSpecName, "system-spec-name", "", "The name of the system spec (e.g., gke) that's used in the node e2e test. The system specs are in test/e2e_node/system/specs/. This is used by the test framework to determine which tests to run for validating the system requirements.")
-	flag.Var(utilflag.NewMapStringString(&TestContext.ExtraEnvs), "extra-envs", "The extra environment variables needed for node e2e tests. Format: a list of key=value pairs, e.g., env1=val1,env2=val2")
 }
 
 func RegisterStorageFlags() {
@@ -342,7 +342,7 @@ func createKubeConfig(clientCfg *restclient.Config) *clientcmdapi.Config {
 	config := clientcmdapi.NewConfig()
 
 	credentials := clientcmdapi.NewAuthInfo()
-	credentials.Token = clientCfg.BearerToken
+	credentials.TokenFile = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 	credentials.ClientCertificate = clientCfg.TLSClientConfig.CertFile
 	if len(credentials.ClientCertificate) == 0 {
 		credentials.ClientCertificateData = clientCfg.TLSClientConfig.CertData

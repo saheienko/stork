@@ -34,9 +34,9 @@ type FakeClusterPairs struct {
 	ns   string
 }
 
-var clusterpairsResource = schema.GroupVersionResource{Group: "stork.libopenstorage.org", Version: "v1alpha1", Resource: "clusterpairs"}
+var clusterpairsResource = schema.GroupVersionResource{Group: "stork", Version: "v1alpha1", Resource: "clusterpairs"}
 
-var clusterpairsKind = schema.GroupVersionKind{Group: "stork.libopenstorage.org", Version: "v1alpha1", Kind: "ClusterPair"}
+var clusterpairsKind = schema.GroupVersionKind{Group: "stork", Version: "v1alpha1", Kind: "ClusterPair"}
 
 // Get takes name of the clusterPair, and returns the corresponding clusterPair object, and an error if there is any.
 func (c *FakeClusterPairs) Get(name string, options v1.GetOptions) (result *v1alpha1.ClusterPair, err error) {

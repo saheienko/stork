@@ -19,14 +19,14 @@ package azure
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-03-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2018-04-01/compute"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2017-09-01/network"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/golang/glog"
-
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/kubernetes/pkg/cloudprovider"
 )
@@ -36,6 +36,8 @@ var (
 	lbCacheTTL  = 2 * time.Minute
 	nsgCacheTTL = 2 * time.Minute
 	rtCacheTTL  = 2 * time.Minute
+
+	azureNodeProviderIDRE = regexp.MustCompile(`^azure:///subscriptions/(?:.*)/resourceGroups/(?:.*)/providers/Microsoft.Compute/(?:.*)`)
 )
 
 // checkExistsFromError inspects an error and returns a true if err is nil,
@@ -63,19 +65,6 @@ func ignoreStatusNotFoundFromError(err error) error {
 	}
 	v, ok := err.(autorest.DetailedError)
 	if ok && v.StatusCode == http.StatusNotFound {
-		return nil
-	}
-	return err
-}
-
-// ignoreStatusForbiddenFromError returns nil if the status code is StatusForbidden.
-// This happens when AuthorizationFailed is reported from Azure API.
-func ignoreStatusForbiddenFromError(err error) error {
-	if err == nil {
-		return nil
-	}
-	v, ok := err.(autorest.DetailedError)
-	if ok && v.StatusCode == http.StatusForbidden {
 		return nil
 	}
 	return err
@@ -202,7 +191,13 @@ func (az *Cloud) newVMCache() (*timedCache, error) {
 		// Consider adding separate parameter for controlling 'InstanceView' once node update issue #56276 is fixed
 		ctx, cancel := getContextWithCancel()
 		defer cancel()
-		vm, err := az.VirtualMachinesClient.Get(ctx, az.ResourceGroup, key, compute.InstanceView)
+
+		resourceGroup, err := az.GetNodeResourceGroup(key)
+		if err != nil {
+			return nil, err
+		}
+
+		vm, err := az.VirtualMachinesClient.Get(ctx, resourceGroup, key, compute.InstanceView)
 		exists, message, realErr := checkResourceExistsFromError(err)
 		if realErr != nil {
 			return nil, realErr
@@ -291,36 +286,20 @@ func (az *Cloud) excludeMasterNodesFromStandardLB() bool {
 	return az.ExcludeMasterFromStandardLB != nil && *az.ExcludeMasterFromStandardLB
 }
 
-func (az *Cloud) disableLoadBalancerOutboundSNAT() bool {
-	if !az.useStandardLoadBalancer() || az.DisableOutboundSNAT == nil {
-		return false
+// IsNodeUnmanaged returns true if the node is not managed by Azure cloud provider.
+// Those nodes includes on-prem or VMs from other clouds. They will not be added to load balancer
+// backends. Azure routes and managed disks are also not supported for them.
+func (az *Cloud) IsNodeUnmanaged(nodeName string) (bool, error) {
+	unmanagedNodes, err := az.GetUnmanagedNodes()
+	if err != nil {
+		return false, err
 	}
 
-	return *az.DisableOutboundSNAT
+	return unmanagedNodes.Has(nodeName), nil
 }
 
-// isBackendPoolOnSameLB checks whether newBackendPoolID is on the same load balancer as existingBackendPools.
-// Since both public and internal LBs are supported, lbName and lbName-internal are treated as same.
-// If not same, the lbName for existingBackendPools would also be returned.
-func isBackendPoolOnSameLB(newBackendPoolID string, existingBackendPools []string) (bool, string, error) {
-	matches := backendPoolIDRE.FindStringSubmatch(newBackendPoolID)
-	if len(matches) != 2 {
-		return false, "", fmt.Errorf("new backendPoolID %q is in wrong format", newBackendPoolID)
-	}
-
-	newLBName := matches[1]
-	newLBNameTrimmed := strings.TrimRight(newLBName, InternalLoadBalancerNameSuffix)
-	for _, backendPool := range existingBackendPools {
-		matches := backendPoolIDRE.FindStringSubmatch(backendPool)
-		if len(matches) != 2 {
-			return false, "", fmt.Errorf("existing backendPoolID %q is in wrong format", backendPool)
-		}
-
-		lbName := matches[1]
-		if !strings.EqualFold(strings.TrimRight(lbName, InternalLoadBalancerNameSuffix), newLBNameTrimmed) {
-			return false, lbName, nil
-		}
-	}
-
-	return true, "", nil
+// IsNodeUnmanagedByProviderID returns true if the node is not managed by Azure cloud provider.
+// All managed node's providerIDs are in format 'azure:///subscriptions/<id>/resourceGroups/<rg>/providers/Microsoft.Compute/.*'
+func (az *Cloud) IsNodeUnmanagedByProviderID(providerID string) bool {
+	return !azureNodeProviderIDRE.Match([]byte(providerID))
 }

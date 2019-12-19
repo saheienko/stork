@@ -34,9 +34,9 @@ type FakeMigrations struct {
 	ns   string
 }
 
-var migrationsResource = schema.GroupVersionResource{Group: "stork.libopenstorage.org", Version: "v1alpha1", Resource: "migrations"}
+var migrationsResource = schema.GroupVersionResource{Group: "stork", Version: "v1alpha1", Resource: "migrations"}
 
-var migrationsKind = schema.GroupVersionKind{Group: "stork.libopenstorage.org", Version: "v1alpha1", Kind: "Migration"}
+var migrationsKind = schema.GroupVersionKind{Group: "stork", Version: "v1alpha1", Kind: "Migration"}
 
 // Get takes name of the migration, and returns the corresponding migration object, and an error if there is any.
 func (c *FakeMigrations) Get(name string, options v1.GetOptions) (result *v1alpha1.Migration, err error) {

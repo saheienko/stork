@@ -27,11 +27,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
-	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
 	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-	"k8s.io/kubernetes/pkg/kubectl/genericclioptions"
 	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
 
 	"bytes"
@@ -70,7 +70,7 @@ type CopyOptions struct {
 	Namespace string
 
 	ClientConfig *restclient.Config
-	Clientset    internalclientset.Interface
+	Clientset    kubernetes.Interface
 
 	genericclioptions.IOStreams
 }
@@ -144,7 +144,7 @@ func (o *CopyOptions) Complete(f cmdutil.Factory, cmd *cobra.Command) error {
 		return err
 	}
 
-	o.Clientset, err = f.ClientSet()
+	o.Clientset, err = f.KubernetesClientSet()
 	if err != nil {
 		return err
 	}
@@ -296,24 +296,12 @@ func (o *CopyOptions) copyFromPod(src, dest fileSpec) error {
 	// remove extraneous path shortcuts - these could occur if a path contained extra "../"
 	// and attempted to navigate beyond "/" in a remote filesystem
 	prefix = stripPathShortcuts(prefix)
-	return o.untarAll(reader, dest.File, prefix)
+	return untarAll(reader, dest.File, prefix)
 }
 
 // stripPathShortcuts removes any leading or trailing "../" from a given path
 func stripPathShortcuts(p string) string {
 	newPath := path.Clean(p)
-	trimmed := strings.TrimPrefix(newPath, "../")
-
-	for trimmed != newPath {
-		newPath = trimmed
-		trimmed = strings.TrimPrefix(newPath, "../")
-	}
-
-	// trim leftover {".", ".."}
-	if newPath == "." || newPath == ".." {
-		newPath = ""
-	}
-
 	if len(newPath) > 0 && string(newPath[0]) == "/" {
 		return newPath[1:]
 	}
@@ -401,7 +389,7 @@ func clean(fileName string) string {
 	return path.Clean(string(os.PathSeparator) + fileName)
 }
 
-func (o *CopyOptions) untarAll(reader io.Reader, destFile, prefix string) error {
+func untarAll(reader io.Reader, destFile, prefix string) error {
 	entrySeq := -1
 
 	// TODO: use compression here?
@@ -416,12 +404,6 @@ func (o *CopyOptions) untarAll(reader io.Reader, destFile, prefix string) error 
 		}
 		entrySeq++
 		mode := header.FileInfo().Mode()
-		// all the files will start with the prefix, which is the directory where
-		// they were located on the pod, we need to strip down that prefix, but
-		// if the prefix is missing it means the tar was tempered with
-		if !strings.HasPrefix(header.Name, prefix) {
-			return fmt.Errorf("tar contents corrupted")
-		}
 		outFileName := path.Join(destFile, clean(header.Name[len(prefix):]))
 		baseName := path.Dir(outFileName)
 		if err := os.MkdirAll(baseName, 0755); err != nil {
@@ -446,16 +428,8 @@ func (o *CopyOptions) untarAll(reader io.Reader, destFile, prefix string) error 
 		}
 
 		if mode&os.ModeSymlink != 0 {
-			linkname := header.Linkname
-			// error is returned if linkname can't be made relative to destFile,
-			// but relative can end up being ../dir that's why we also need to
-			// verify if relative path is the same after Clean-ing
-			relative, err := filepath.Rel(destFile, linkname)
-			if path.IsAbs(linkname) && (err != nil || relative != stripPathShortcuts(relative)) {
-				fmt.Fprintf(o.IOStreams.ErrOut, "warning: link %q is pointing to %q which is outside target destination, skipping\n", outFileName, header.Linkname)
-				continue
-			}
-			if err := os.Symlink(linkname, outFileName); err != nil {
+			err := os.Symlink(header.Linkname, outFileName)
+			if err != nil {
 				return err
 			}
 		} else {

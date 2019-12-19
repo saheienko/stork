@@ -34,9 +34,9 @@ type FakeVolumeSnapshotSchedules struct {
 	ns   string
 }
 
-var volumesnapshotschedulesResource = schema.GroupVersionResource{Group: "stork.libopenstorage.org", Version: "v1alpha1", Resource: "volumesnapshotschedules"}
+var volumesnapshotschedulesResource = schema.GroupVersionResource{Group: "stork", Version: "v1alpha1", Resource: "volumesnapshotschedules"}
 
-var volumesnapshotschedulesKind = schema.GroupVersionKind{Group: "stork.libopenstorage.org", Version: "v1alpha1", Kind: "VolumeSnapshotSchedule"}
+var volumesnapshotschedulesKind = schema.GroupVersionKind{Group: "stork", Version: "v1alpha1", Kind: "VolumeSnapshotSchedule"}
 
 // Get takes name of the volumeSnapshotSchedule, and returns the corresponding volumeSnapshotSchedule object, and an error if there is any.
 func (c *FakeVolumeSnapshotSchedules) Get(name string, options v1.GetOptions) (result *v1alpha1.VolumeSnapshotSchedule, err error) {

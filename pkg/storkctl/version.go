@@ -7,7 +7,7 @@ import (
 	"github.com/portworx/sched-ops/k8s"
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/kubernetes/pkg/kubectl/genericclioptions"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
 )
 
 func newVersionCommand(cmdFactory Factory, ioStreams genericclioptions.IOStreams) *cobra.Command {
