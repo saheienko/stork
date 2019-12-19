@@ -138,7 +138,10 @@ func (c *Cloud) ensureLoadBalancerv2(namespacedName types.NamespacedName, loadBa
 		loadBalancer = createResponse.LoadBalancers[0]
 
 		// Create Target Groups
-		resourceArns := make([]*string, 0, len(mappings))
+		addTagsInput := &elbv2.AddTagsInput{
+			ResourceArns: []*string{},
+			Tags:         []*elbv2.Tag{},
+		}
 
 		for i := range mappings {
 			// It is easier to keep track of updates by having possibly
@@ -147,28 +150,20 @@ func (c *Cloud) ensureLoadBalancerv2(namespacedName types.NamespacedName, loadBa
 			if err != nil {
 				return nil, fmt.Errorf("Error creating listener: %q", err)
 			}
-			resourceArns = append(resourceArns, targetGroupArn)
+			addTagsInput.ResourceArns = append(addTagsInput.ResourceArns, targetGroupArn)
 
 		}
 
 		// Add tags to targets
-		targetGroupTags := make([]*elbv2.Tag, 0, len(tags))
-
 		for k, v := range tags {
-			targetGroupTags = append(targetGroupTags, &elbv2.Tag{
+			addTagsInput.Tags = append(addTagsInput.Tags, &elbv2.Tag{
 				Key: aws.String(k), Value: aws.String(v),
 			})
 		}
-		if len(resourceArns) > 0 && len(targetGroupTags) > 0 {
-			// elbv2.AddTags doesn't allow to tag multiple resources at once
-			for _, arn := range resourceArns {
-				_, err = c.elbv2.AddTags(&elbv2.AddTagsInput{
-					ResourceArns: []*string{arn},
-					Tags:         targetGroupTags,
-				})
-				if err != nil {
-					return nil, fmt.Errorf("Error adding tags after creating Load Balancer: %q", err)
-				}
+		if len(addTagsInput.ResourceArns) > 0 && len(addTagsInput.Tags) > 0 {
+			_, err = c.elbv2.AddTags(addTagsInput)
+			if err != nil {
+				return nil, fmt.Errorf("Error adding tags after creating Load Balancer: %q", err)
 			}
 		}
 	} else {
@@ -569,17 +564,12 @@ func filterForIPRangeDescription(securityGroups []*ec2.SecurityGroup, lbName str
 	response := []*ec2.SecurityGroup{}
 	clientRule := fmt.Sprintf("%s=%s", NLBClientRuleDescription, lbName)
 	healthRule := fmt.Sprintf("%s=%s", NLBHealthCheckRuleDescription, lbName)
-	alreadyAdded := sets.NewString()
 	for i := range securityGroups {
 		for j := range securityGroups[i].IpPermissions {
 			for k := range securityGroups[i].IpPermissions[j].IpRanges {
 				description := aws.StringValue(securityGroups[i].IpPermissions[j].IpRanges[k].Description)
 				if description == clientRule || description == healthRule {
-					sgIDString := aws.StringValue(securityGroups[i].GroupId)
-					if !alreadyAdded.Has(sgIDString) {
-						response = append(response, securityGroups[i])
-						alreadyAdded.Insert(sgIDString)
-					}
+					response = append(response, securityGroups[i])
 				}
 			}
 		}
@@ -587,7 +577,7 @@ func filterForIPRangeDescription(securityGroups []*ec2.SecurityGroup, lbName str
 	return response
 }
 
-func (c *Cloud) getVpcCidrBlocks() ([]string, error) {
+func (c *Cloud) getVpcCidrBlock() (*string, error) {
 	vpcs, err := c.ec2.DescribeVpcs(&ec2.DescribeVpcsInput{
 		VpcIds: []*string{aws.String(c.vpcID)},
 	})
@@ -597,19 +587,13 @@ func (c *Cloud) getVpcCidrBlocks() ([]string, error) {
 	if len(vpcs.Vpcs) != 1 {
 		return nil, fmt.Errorf("Error querying VPC for ELB, got %d vpcs for %s", len(vpcs.Vpcs), c.vpcID)
 	}
-
-	cidrBlocks := make([]string, 0, len(vpcs.Vpcs[0].CidrBlockAssociationSet))
-	for _, cidr := range vpcs.Vpcs[0].CidrBlockAssociationSet {
-		cidrBlocks = append(cidrBlocks, aws.StringValue(cidr.CidrBlock))
-	}
-	return cidrBlocks, nil
+	return vpcs.Vpcs[0].CidrBlock, nil
 }
 
 // abstraction for updating SG rules
 // if clientTraffic is false, then only update HealthCheck rules
 func (c *Cloud) updateInstanceSecurityGroupsForNLBTraffic(actualGroups []*ec2.SecurityGroup, desiredSgIds []string, ports []int64, lbName string, clientCidrs []string, clientTraffic bool) error {
 
-	glog.V(8).Infof("updateInstanceSecurityGroupsForNLBTraffic: actualGroups=%v, desiredSgIds=%v, ports=%v, clientTraffic=%v", actualGroups, desiredSgIds, ports, clientTraffic)
 	// Map containing the groups we want to make changes on; the ports to make
 	// changes on; and whether to add or remove it. true to add, false to remove
 	portChanges := map[string]map[int64]bool{}
@@ -664,16 +648,16 @@ func (c *Cloud) updateInstanceSecurityGroupsForNLBTraffic(actualGroups []*ec2.Se
 			if add {
 				if clientTraffic {
 					glog.V(2).Infof("Adding rule for client MTU discovery from the network load balancer (%s) to instances (%s)", clientCidrs, instanceSecurityGroupID)
-					glog.V(2).Infof("Adding rule for client traffic from the network load balancer (%s) to instances (%s), port (%v)", clientCidrs, instanceSecurityGroupID, port)
+					glog.V(2).Infof("Adding rule for client traffic from the network load balancer (%s) to instances (%s)", clientCidrs, instanceSecurityGroupID)
 				} else {
-					glog.V(2).Infof("Adding rule for health check traffic from the network load balancer (%s) to instances (%s), port (%v)", clientCidrs, instanceSecurityGroupID, port)
+					glog.V(2).Infof("Adding rule for health check traffic from the network load balancer (%s) to instances (%s)", clientCidrs, instanceSecurityGroupID)
 				}
 			} else {
 				if clientTraffic {
 					glog.V(2).Infof("Removing rule for client MTU discovery from the network load balancer (%s) to instances (%s)", clientCidrs, instanceSecurityGroupID)
-					glog.V(2).Infof("Removing rule for client traffic from the network load balancer (%s) to instance (%s), port (%v)", clientCidrs, instanceSecurityGroupID, port)
+					glog.V(2).Infof("Removing rule for client traffic from the network load balancer (%s) to instance (%s)", clientCidrs, instanceSecurityGroupID)
 				}
-				glog.V(2).Infof("Removing rule for health check traffic from the network load balancer (%s) to instance (%s), port (%v)", clientCidrs, instanceSecurityGroupID, port)
+				glog.V(2).Infof("Removing rule for health check traffic from the network load balancer (%s) to instance (%s)", clientCidrs, instanceSecurityGroupID)
 			}
 
 			if clientTraffic {
@@ -815,7 +799,7 @@ func (c *Cloud) updateInstanceSecurityGroupsForNLB(mappings []nlbPortMapping, in
 		return nil
 	}
 
-	vpcCidrBlocks, err := c.getVpcCidrBlocks()
+	vpcCidr, err := c.getVpcCidrBlock()
 	if err != nil {
 		return err
 	}
@@ -900,7 +884,7 @@ func (c *Cloud) updateInstanceSecurityGroupsForNLB(mappings []nlbPortMapping, in
 	}
 
 	// Run once for health check traffic
-	err = c.updateInstanceSecurityGroupsForNLBTraffic(actualGroups, desiredGroupIds, healthCheckPorts, lbName, vpcCidrBlocks, false)
+	err = c.updateInstanceSecurityGroupsForNLBTraffic(actualGroups, desiredGroupIds, healthCheckPorts, lbName, []string{aws.StringValue(vpcCidr)}, false)
 	if err != nil {
 		return err
 	}
@@ -928,9 +912,17 @@ func (c *Cloud) ensureLoadBalancer(namespacedName types.NamespacedName, loadBala
 
 		// We are supposed to specify one subnet per AZ.
 		// TODO: What happens if we have more than one subnet per AZ?
-		createRequest.Subnets = stringPointerArray(subnetIDs)
+		if subnetIDs == nil {
+			createRequest.Subnets = nil
+		} else {
+			createRequest.Subnets = aws.StringSlice(subnetIDs)
+		}
 
-		createRequest.SecurityGroups = stringPointerArray(securityGroupIDs)
+		if securityGroupIDs == nil {
+			createRequest.SecurityGroups = nil
+		} else {
+			createRequest.SecurityGroups = aws.StringSlice(securityGroupIDs)
+		}
 
 		// Get additional tags set by the user
 		tags := getLoadBalancerAdditionalTags(annotations)
@@ -1012,7 +1004,11 @@ func (c *Cloud) ensureLoadBalancer(namespacedName types.NamespacedName, loadBala
 				// This call just replaces the security groups, unlike e.g. subnets (!)
 				request := &elb.ApplySecurityGroupsToLoadBalancerInput{}
 				request.LoadBalancerName = aws.String(loadBalancerName)
-				request.SecurityGroups = stringPointerArray(securityGroupIDs)
+				if securityGroupIDs == nil {
+					request.SecurityGroups = nil
+				} else {
+					request.SecurityGroups = aws.StringSlice(securityGroupIDs)
+				}
 				glog.V(2).Info("Applying updated security groups to load balancer")
 				_, err := c.elb.ApplySecurityGroupsToLoadBalancer(request)
 				if err != nil {

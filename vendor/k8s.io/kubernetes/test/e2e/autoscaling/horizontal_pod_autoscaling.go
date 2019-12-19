@@ -46,7 +46,7 @@ var _ = SIGDescribe("[HPA] Horizontal pod autoscaling (scale resource: CPU)", fu
 	})
 
 	SIGDescribe("[Serial] [Slow] ReplicaSet", func() {
-		// CPU tests via deployments
+		// CPU tests via ReplicaSets
 		It(titleUp, func() {
 			scaleUp("rs", common.KindReplicaSet, false, rc, f)
 		})
@@ -157,7 +157,7 @@ func scaleDown(name string, kind schema.GroupVersionKind, checkStability bool, r
 	}
 	scaleTest := &HPAScaleTest{
 		initPods:                    5,
-		totalInitialCPUUsage:        375,
+		totalInitialCPUUsage:        325,
 		perPodCPURequest:            500,
 		targetCPUUtilizationPercent: 30,
 		minPods:                     1,

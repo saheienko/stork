@@ -34,9 +34,9 @@ type FakeVolumeSnapshotRestores struct {
 	ns   string
 }
 
-var volumesnapshotrestoresResource = schema.GroupVersionResource{Group: "stork.libopenstorage.org", Version: "v1alpha1", Resource: "volumesnapshotrestores"}
+var volumesnapshotrestoresResource = schema.GroupVersionResource{Group: "stork", Version: "v1alpha1", Resource: "volumesnapshotrestores"}
 
-var volumesnapshotrestoresKind = schema.GroupVersionKind{Group: "stork.libopenstorage.org", Version: "v1alpha1", Kind: "VolumeSnapshotRestore"}
+var volumesnapshotrestoresKind = schema.GroupVersionKind{Group: "stork", Version: "v1alpha1", Kind: "VolumeSnapshotRestore"}
 
 // Get takes name of the volumeSnapshotRestore, and returns the corresponding volumeSnapshotRestore object, and an error if there is any.
 func (c *FakeVolumeSnapshotRestores) Get(name string, options v1.GetOptions) (result *v1alpha1.VolumeSnapshotRestore, err error) {

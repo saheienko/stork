@@ -30,8 +30,6 @@ type FakeMounter struct {
 	MountPoints []MountPoint
 	Log         []FakeAction
 	Filesystem  map[string]FileType
-	// Error to return for a path when calling IsLikelyNotMountPoint
-	MountCheckErrors map[string]error
 	// Some tests run things in parallel, make sure the mounter does not produce
 	// any golang's DATA RACE warnings.
 	mutex sync.Mutex
@@ -125,7 +123,6 @@ func (f *FakeMounter) Unmount(target string) error {
 	}
 	f.MountPoints = newMountpoints
 	f.Log = append(f.Log, FakeAction{Action: FakeActionUnmount, Target: absTarget})
-	delete(f.MountCheckErrors, target)
 	return nil
 }
 
@@ -148,12 +145,7 @@ func (f *FakeMounter) IsLikelyNotMountPoint(file string) (bool, error) {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 
-	err := f.MountCheckErrors[file]
-	if err != nil {
-		return false, err
-	}
-
-	_, err = os.Stat(file)
+	_, err := os.Stat(file)
 	if err != nil {
 		return true, err
 	}
@@ -199,7 +191,10 @@ func (f *FakeMounter) MakeRShared(path string) error {
 }
 
 func (f *FakeMounter) GetFileType(pathname string) (FileType, error) {
-	return FileType("fake"), nil
+	if t, ok := f.Filesystem[pathname]; ok {
+		return t, nil
+	}
+	return FileType("Directory"), nil
 }
 
 func (f *FakeMounter) MakeDir(pathname string) error {
@@ -211,7 +206,14 @@ func (f *FakeMounter) MakeFile(pathname string) error {
 }
 
 func (f *FakeMounter) ExistsPath(pathname string) (bool, error) {
-	return false, errors.New("not implemented")
+	if _, ok := f.Filesystem[pathname]; ok {
+		return true, nil
+	}
+	return false, nil
+}
+
+func (f *FakeMounter) EvalHostSymlinks(pathname string) (string, error) {
+	return pathname, nil
 }
 
 func (f *FakeMounter) PrepareSafeSubpath(subPath Subpath) (newHostPath string, cleanupAction func(), err error) {

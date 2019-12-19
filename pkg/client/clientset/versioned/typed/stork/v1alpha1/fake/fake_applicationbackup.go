@@ -34,9 +34,9 @@ type FakeApplicationBackups struct {
 	ns   string
 }
 
-var applicationbackupsResource = schema.GroupVersionResource{Group: "stork.libopenstorage.org", Version: "v1alpha1", Resource: "applicationbackups"}
+var applicationbackupsResource = schema.GroupVersionResource{Group: "stork", Version: "v1alpha1", Resource: "applicationbackups"}
 
-var applicationbackupsKind = schema.GroupVersionKind{Group: "stork.libopenstorage.org", Version: "v1alpha1", Kind: "ApplicationBackup"}
+var applicationbackupsKind = schema.GroupVersionKind{Group: "stork", Version: "v1alpha1", Kind: "ApplicationBackup"}
 
 // Get takes name of the applicationBackup, and returns the corresponding applicationBackup object, and an error if there is any.
 func (c *FakeApplicationBackups) Get(name string, options v1.GetOptions) (result *v1alpha1.ApplicationBackup, err error) {

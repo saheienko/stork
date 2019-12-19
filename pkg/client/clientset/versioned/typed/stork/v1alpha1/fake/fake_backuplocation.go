@@ -34,9 +34,9 @@ type FakeBackupLocations struct {
 	ns   string
 }
 
-var backuplocationsResource = schema.GroupVersionResource{Group: "stork.libopenstorage.org", Version: "v1alpha1", Resource: "backuplocations"}
+var backuplocationsResource = schema.GroupVersionResource{Group: "stork", Version: "v1alpha1", Resource: "backuplocations"}
 
-var backuplocationsKind = schema.GroupVersionKind{Group: "stork.libopenstorage.org", Version: "v1alpha1", Kind: "BackupLocation"}
+var backuplocationsKind = schema.GroupVersionKind{Group: "stork", Version: "v1alpha1", Kind: "BackupLocation"}
 
 // Get takes name of the backupLocation, and returns the corresponding backupLocation object, and an error if there is any.
 func (c *FakeBackupLocations) Get(name string, options v1.GetOptions) (result *v1alpha1.BackupLocation, err error) {

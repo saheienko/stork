@@ -182,9 +182,11 @@ func (p *criStatsProvider) ImageFsStats() (*statsapi.FsStats, error) {
 	// TODO(yguo0905): Support returning stats of multiple image filesystems.
 	for _, fs := range resp {
 		s := &statsapi.FsStats{
-			Time:       metav1.NewTime(time.Unix(0, fs.Timestamp)),
-			UsedBytes:  &fs.UsedBytes.Value,
-			InodesUsed: &fs.InodesUsed.Value,
+			Time:      metav1.NewTime(time.Unix(0, fs.Timestamp)),
+			UsedBytes: &fs.UsedBytes.Value,
+		}
+		if fs.InodesUsed != nil {
+			s.InodesUsed = &fs.InodesUsed.Value
 		}
 		imageFsInfo := p.getFsInfo(fs.GetFsId())
 		if imageFsInfo != nil {
@@ -352,18 +354,12 @@ func (p *criStatsProvider) makeContainerStats(
 		if stats.Cpu.UsageCoreNanoSeconds != nil {
 			result.CPU.UsageCoreNanoSeconds = &stats.Cpu.UsageCoreNanoSeconds.Value
 		}
-	} else {
-		result.CPU.Time = metav1.NewTime(time.Unix(0, time.Now().UnixNano()))
-		result.CPU.UsageCoreNanoSeconds = Uint64Ptr(0)
 	}
 	if stats.Memory != nil {
 		result.Memory.Time = metav1.NewTime(time.Unix(0, stats.Memory.Timestamp))
 		if stats.Memory.WorkingSetBytes != nil {
 			result.Memory.WorkingSetBytes = &stats.Memory.WorkingSetBytes.Value
 		}
-	} else {
-		result.Memory.Time = metav1.NewTime(time.Unix(0, time.Now().UnixNano()))
-		result.Memory.WorkingSetBytes = Uint64Ptr(0)
 	}
 	if stats.WritableLayer != nil {
 		result.Rootfs.Time = metav1.NewTime(time.Unix(0, stats.WritableLayer.Timestamp))

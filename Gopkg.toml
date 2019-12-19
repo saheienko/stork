@@ -12,43 +12,57 @@ required = [
 
 [[override]]
   name = "k8s.io/code-generator"
-  # revision for tag "kubernetes-1.11.2"
-  revision = "6702109cc68eb6fe6350b83e14407c8d7309fd1a"
+  # revision for tag "kubernetes-1.12.3"
+  revision = "3dcf91f64f638563e5106f21f50c31fa361c918d"
 
+[[override]]
+  name = "k8s.io/kubernetes"
+  #version = "=v1.12.3"
+  revision = "435f92c719f279a3a67808c80521ea17d5715c66"
+  #version = "=v1.14.6"
+  #revision = "96fac5cd13a5dc064f7d9f4f23030a6aeface6cc"
 
 [[override]]
   name = "k8s.io/api"
-  version = "kubernetes-1.11.2"
+  version = "kubernetes-1.12.3"
 
 [[override]]
   name = "k8s.io/apiextensions-apiserver"
-  version = "kubernetes-1.11.2"
+  version = "kubernetes-1.12.3"
 
 [[override]]
   name = "k8s.io/apimachinery"
-  version = "kubernetes-1.11.2"
+  version = "kubernetes-1.12.3"
+
+[[override]]
+  name = "k8s.io/apiserver"
+  version = "kubernetes-1.12.3"
+
+[[override]]
+  name = "k8s.io/cli-runtime"
+  version = "kubernetes-1.12.3"
 
 [[override]]
   name = "k8s.io/client-go"
-  version = "kubernetes-1.11.2"
+  version = "kubernetes-1.12.3"
 
 [[override]]
   name = "sigs.k8s.io/controller-runtime"
-  version = "=v0.1.4"
+  version = "=v0.1.8"
 
 [[override]]
   name = "github.com/operator-framework/operator-sdk"
   # The version rule is used for a specific release and the master branch for in between releases.
   # branch = "master" #osdk_branch_annotation
-  version = "=v0.2.1" #osdk_version_annotation
+  version = "=v0.10.0" #osdk_version_annotation
 
 [prune]
   go-tests = true
   non-go = true
 
-  [[prune.project]]
-    name = "k8s.io/code-generator"
-    non-go = false
+[[prune.project]]
+  name = "k8s.io/code-generator"
+  non-go = false
 
 ## temp once, for migration purpose
 
@@ -56,13 +70,19 @@ required = [
   name = "github.com/libopenstorage/autopilot-api"
   source = "github.com/saheienko/autopilot-api"
   branch = "update-operator-sdk"
+  #branch = "master"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/libopenstorage/stork"
 
 ## other packages
 
 [[override]]
   name = "github.com/kubernetes-incubator/external-storage"
   source = "github.com/libopenstorage/external-storage"
-  branch = "openstorage-5.1"
+  #branch = "openstorage-5.2"
+  revision = "d5e6a33a172968d802e99c375ba1796287345eb2"
 
 [[override]]
   name = "github.com/libopenstorage/openstorage"
@@ -70,7 +90,9 @@ required = [
 
 [[override]]
   name = "github.com/portworx/sched-ops"
-  branch = "kubernetes-1.11"
+  source = "github.com/saheienko/sched-ops"
+  branch = "k8s-1.12-stork"
+  #revision = "bce671489f9f8c0fe7c288b4c04eaf7374feb18b"
 
 [[constraint]]
   branch = "master"
@@ -107,3 +129,8 @@ required = [
 [[override]]
   name = "gopkg.in/fsnotify.v1"
   source = "https://github.com/fsnotify/fsnotify.git"
+
+
+[[override]]
+  name = "github.com/libopenstorage/secrets"
+  branch = "master"

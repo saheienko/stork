@@ -21,7 +21,6 @@ import (
 	"os"
 
 	"github.com/golang/glog"
-	volumeclient "github.com/libopenstorage/openstorage/api/client/volume"
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,7 +43,7 @@ func ProbeVolumePlugins() []volume.VolumePlugin {
 
 type portworxVolumePlugin struct {
 	host volume.VolumeHost
-	util *portworxVolumeUtil
+	util *PortworxVolumeUtil
 }
 
 var _ volume.VolumePlugin = &portworxVolumePlugin{}
@@ -62,18 +61,8 @@ func getPath(uid types.UID, volName string, host volume.VolumeHost) string {
 }
 
 func (plugin *portworxVolumePlugin) Init(host volume.VolumeHost) error {
-	client, err := volumeclient.NewDriverClient(
-		fmt.Sprintf("http://%s:%d", host.GetHostName(), osdMgmtDefaultPort),
-		pxdDriverName, osdDriverVersion, pxDriverName)
-	if err != nil {
-		return err
-	}
-
 	plugin.host = host
-	plugin.util = &portworxVolumeUtil{
-		portworxClient: client,
-	}
-
+	plugin.util = &PortworxVolumeUtil{}
 	return nil
 }
 
