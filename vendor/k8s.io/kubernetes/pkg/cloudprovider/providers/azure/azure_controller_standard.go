@@ -17,7 +17,7 @@ limitations under the License.
 package azure
 
 import (
-	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-03-01/compute"
@@ -34,7 +34,15 @@ func (as *availabilitySet) AttachDisk(isManagedDisk bool, diskName, diskURI stri
 		return err
 	}
 
-	disks := *vm.StorageProfile.DataDisks
+	vmName := mapNodeNameToVMName(nodeName)
+	nodeResourceGroup, err := as.GetNodeResourceGroup(vmName)
+	if err != nil {
+		return err
+	}
+
+	disks := make([]compute.DataDisk, len(*vm.StorageProfile.DataDisks))
+	copy(disks, *vm.StorageProfile.DataDisks)
+
 	if isManagedDisk {
 		disks = append(disks,
 			compute.DataDisk{
@@ -68,22 +76,21 @@ func (as *availabilitySet) AttachDisk(isManagedDisk bool, diskName, diskURI stri
 			},
 		},
 	}
-	vmName := mapNodeNameToVMName(nodeName)
-	glog.V(2).Infof("azureDisk - update(%s): vm(%s) - attach disk(%s, %s)", as.resourceGroup, vmName, diskName, diskURI)
+	glog.V(2).Infof("azureDisk - update(%s): vm(%s) - attach disk(%s, %s)", nodeResourceGroup, vmName, diskName, diskURI)
 	ctx, cancel := getContextWithCancel()
 	defer cancel()
 
 	// Invalidate the cache right after updating
 	defer as.cloud.vmCache.Delete(vmName)
 
-	_, err = as.VirtualMachinesClient.CreateOrUpdate(ctx, as.resourceGroup, vmName, newVM)
+	_, err = as.VirtualMachinesClient.CreateOrUpdate(ctx, nodeResourceGroup, vmName, newVM)
 	if err != nil {
 		glog.Errorf("azureDisk - attach disk(%s, %s) failed, err: %v", diskName, diskURI, err)
 		detail := err.Error()
 		if strings.Contains(detail, errLeaseFailed) || strings.Contains(detail, errDiskBlobNotFound) {
 			// if lease cannot be acquired or disk not found, immediately detach the disk and return the original error
 			glog.V(2).Infof("azureDisk - err %v, try detach disk(%s, %s)", err, diskName, diskURI)
-			as.DetachDiskByName(diskName, diskURI, nodeName)
+			as.DetachDisk(diskName, diskURI, nodeName)
 		}
 	} else {
 		glog.V(2).Infof("azureDisk - attach disk(%s, %s) succeeded", diskName, diskURI)
@@ -91,17 +98,25 @@ func (as *availabilitySet) AttachDisk(isManagedDisk bool, diskName, diskURI stri
 	return err
 }
 
-// DetachDiskByName detaches a vhd from host
+// DetachDisk detaches a disk from host
 // the vhd can be identified by diskName or diskURI
-func (as *availabilitySet) DetachDiskByName(diskName, diskURI string, nodeName types.NodeName) error {
+func (as *availabilitySet) DetachDisk(diskName, diskURI string, nodeName types.NodeName) (*http.Response, error) {
 	vm, err := as.getVirtualMachine(nodeName)
 	if err != nil {
 		// if host doesn't exist, no need to detach
-		glog.Warningf("azureDisk - cannot find node %s, skip detaching disk %s", nodeName, diskName)
-		return nil
+		glog.Warningf("azureDisk - cannot find node %s, skip detaching disk(%s, %s)", nodeName, diskName, diskURI)
+		return nil, nil
 	}
 
-	disks := *vm.StorageProfile.DataDisks
+	vmName := mapNodeNameToVMName(nodeName)
+	nodeResourceGroup, err := as.GetNodeResourceGroup(vmName)
+	if err != nil {
+		return nil, err
+	}
+
+	disks := make([]compute.DataDisk, len(*vm.StorageProfile.DataDisks))
+	copy(disks, *vm.StorageProfile.DataDisks)
+
 	bFoundDisk := false
 	for i, disk := range disks {
 		if disk.Lun != nil && (disk.Name != nil && diskName != "" && *disk.Name == diskName) ||
@@ -116,7 +131,8 @@ func (as *availabilitySet) DetachDiskByName(diskName, diskURI string, nodeName t
 	}
 
 	if !bFoundDisk {
-		return fmt.Errorf("detach azure disk failure, disk %s not found, diskURI: %s", diskName, diskURI)
+		// only log here, next action is to update VM status with original meta data
+		glog.Errorf("detach azure disk: disk %s not found, diskURI: %s", diskName, diskURI)
 	}
 
 	newVM := compute.VirtualMachine{
@@ -128,30 +144,14 @@ func (as *availabilitySet) DetachDiskByName(diskName, diskURI string, nodeName t
 			},
 		},
 	}
-	vmName := mapNodeNameToVMName(nodeName)
-	glog.V(2).Infof("azureDisk - update(%s): vm(%s) - detach disk(%s, %s)", as.resourceGroup, vmName, diskName, diskURI)
+	glog.V(2).Infof("azureDisk - update(%s): vm(%s) - detach disk(%s, %s)", nodeResourceGroup, vmName, diskName, diskURI)
 	ctx, cancel := getContextWithCancel()
 	defer cancel()
 
 	// Invalidate the cache right after updating
 	defer as.cloud.vmCache.Delete(vmName)
 
-	resp, err := as.VirtualMachinesClient.CreateOrUpdate(ctx, as.resourceGroup, vmName, newVM)
-	if as.CloudProviderBackoff && shouldRetryHTTPRequest(resp, err) {
-		glog.V(2).Infof("azureDisk - update(%s) backing off: vm(%s) detach disk(%s, %s), err: %v", as.resourceGroup, vmName, diskName, diskURI, err)
-		retryErr := as.CreateOrUpdateVMWithRetry(vmName, newVM)
-		if retryErr != nil {
-			err = retryErr
-			glog.V(2).Infof("azureDisk - update(%s) abort backoff: vm(%s) detach disk(%s, %s), err: %v", as.resourceGroup, vmName, diskName, diskURI, err)
-		}
-	}
-	if err != nil {
-		glog.Errorf("azureDisk - detach disk(%s, %s) failed, err: %v", diskName, diskURI, err)
-	} else {
-		glog.V(2).Infof("azureDisk - detach disk(%s, %s) succeeded", diskName, diskURI)
-	}
-
-	return err
+	return as.VirtualMachinesClient.CreateOrUpdate(ctx, nodeResourceGroup, vmName, newVM)
 }
 
 // GetDataDisks gets a list of data disks attached to the node.

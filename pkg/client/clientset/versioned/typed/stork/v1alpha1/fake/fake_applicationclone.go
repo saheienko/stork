@@ -34,9 +34,9 @@ type FakeApplicationClones struct {
 	ns   string
 }
 
-var applicationclonesResource = schema.GroupVersionResource{Group: "stork.libopenstorage.org", Version: "v1alpha1", Resource: "applicationclones"}
+var applicationclonesResource = schema.GroupVersionResource{Group: "stork", Version: "v1alpha1", Resource: "applicationclones"}
 
-var applicationclonesKind = schema.GroupVersionKind{Group: "stork.libopenstorage.org", Version: "v1alpha1", Kind: "ApplicationClone"}
+var applicationclonesKind = schema.GroupVersionKind{Group: "stork", Version: "v1alpha1", Kind: "ApplicationClone"}
 
 // Get takes name of the applicationClone, and returns the corresponding applicationClone object, and an error if there is any.
 func (c *FakeApplicationClones) Get(name string, options v1.GetOptions) (result *v1alpha1.ApplicationClone, err error) {

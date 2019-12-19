@@ -30,6 +30,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
+	imageutils "k8s.io/kubernetes/test/utils/image"
+	uexec "k8s.io/utils/exec"
 )
 
 type KubeletOpt string
@@ -49,6 +51,41 @@ const (
 // PodExec wraps RunKubectl to execute a bash cmd in target pod
 func PodExec(pod *v1.Pod, bashExec string) (string, error) {
 	return framework.RunKubectl("exec", fmt.Sprintf("--namespace=%s", pod.Namespace), pod.Name, "--", "/bin/sh", "-c", bashExec)
+}
+
+// VerifyExecInPodSucceed verifies bash cmd in target pod succeed
+func VerifyExecInPodSucceed(pod *v1.Pod, bashExec string) {
+	_, err := PodExec(pod, bashExec)
+	if err != nil {
+		if err, ok := err.(uexec.CodeExitError); ok {
+			exitCode := err.ExitStatus()
+			Expect(err).NotTo(HaveOccurred(),
+				"%q should succeed, but failed with exit code %d and error message %q",
+				bashExec, exitCode, err)
+		} else {
+			Expect(err).NotTo(HaveOccurred(),
+				"%q should succeed, but failed with error message %q",
+				bashExec, err)
+		}
+	}
+}
+
+// VerifyExecInPodFail verifies bash cmd in target pod fail with certain exit code
+func VerifyExecInPodFail(pod *v1.Pod, bashExec string, exitCode int) {
+	_, err := PodExec(pod, bashExec)
+	if err != nil {
+		if err, ok := err.(uexec.CodeExitError); ok {
+			actualExitCode := err.ExitStatus()
+			Expect(actualExitCode).To(Equal(exitCode),
+				"%q should fail with exit code %d, but failed with exit code %d and error message %q",
+				bashExec, exitCode, actualExitCode, err)
+		} else {
+			Expect(err).NotTo(HaveOccurred(),
+				"%q should fail with exit code %d, but failed with error message %q",
+				bashExec, exitCode, err)
+		}
+	}
+	Expect(err).To(HaveOccurred(), "%q should fail with exit code %d, but exit without error", bashExec, exitCode)
 }
 
 // KubeletCommand performs `start`, `restart`, or `stop` on the kubelet running on the node of the target pod and waits
@@ -252,7 +289,7 @@ func RunInPodWithVolume(c clientset.Interface, ns, claimName, command string) {
 			Containers: []v1.Container{
 				{
 					Name:    "volume-tester",
-					Image:   "busybox",
+					Image:   imageutils.GetE2EImage(imageutils.BusyBox),
 					Command: []string{"/bin/sh"},
 					Args:    []string{"-c", command},
 					VolumeMounts: []v1.VolumeMount{
@@ -283,6 +320,79 @@ func RunInPodWithVolume(c clientset.Interface, ns, claimName, command string) {
 		framework.DeletePodOrFail(c, ns, pod.Name)
 	}()
 	framework.ExpectNoError(framework.WaitForPodSuccessInNamespaceSlow(c, pod.Name, pod.Namespace))
+}
+
+func StartExternalProvisioner(c clientset.Interface, ns string, externalPluginName string) *v1.Pod {
+	podClient := c.CoreV1().Pods(ns)
+
+	provisionerPod := &v1.Pod{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Pod",
+			APIVersion: "v1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "external-provisioner-",
+		},
+
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{
+				{
+					Name:  "nfs-provisioner",
+					Image: "quay.io/kubernetes_incubator/nfs-provisioner:v2.1.0-k8s1.11",
+					SecurityContext: &v1.SecurityContext{
+						Capabilities: &v1.Capabilities{
+							Add: []v1.Capability{"DAC_READ_SEARCH"},
+						},
+					},
+					Args: []string{
+						"-provisioner=" + externalPluginName,
+						"-grace-period=0",
+					},
+					Ports: []v1.ContainerPort{
+						{Name: "nfs", ContainerPort: 2049},
+						{Name: "mountd", ContainerPort: 20048},
+						{Name: "rpcbind", ContainerPort: 111},
+						{Name: "rpcbind-udp", ContainerPort: 111, Protocol: v1.ProtocolUDP},
+					},
+					Env: []v1.EnvVar{
+						{
+							Name: "POD_IP",
+							ValueFrom: &v1.EnvVarSource{
+								FieldRef: &v1.ObjectFieldSelector{
+									FieldPath: "status.podIP",
+								},
+							},
+						},
+					},
+					ImagePullPolicy: v1.PullIfNotPresent,
+					VolumeMounts: []v1.VolumeMount{
+						{
+							Name:      "export-volume",
+							MountPath: "/export",
+						},
+					},
+				},
+			},
+			Volumes: []v1.Volume{
+				{
+					Name: "export-volume",
+					VolumeSource: v1.VolumeSource{
+						EmptyDir: &v1.EmptyDirVolumeSource{},
+					},
+				},
+			},
+		},
+	}
+	provisionerPod, err := podClient.Create(provisionerPod)
+	framework.ExpectNoError(err, "Failed to create %s pod: %v", provisionerPod.Name, err)
+
+	framework.ExpectNoError(framework.WaitForPodRunningInNamespace(c, provisionerPod))
+
+	By("locating the provisioner pod")
+	pod, err := podClient.Get(provisionerPod.Name, metav1.GetOptions{})
+	framework.ExpectNoError(err, "Cannot locate the provisioner pod %v: %v", provisionerPod.Name, err)
+
+	return pod
 }
 
 func PrivilegedTestPSPClusterRoleBinding(client clientset.Interface,
@@ -329,5 +439,47 @@ func PrivilegedTestPSPClusterRoleBinding(client clientset.Interface,
 		_, err = roleBindingClient.Create(binding)
 		framework.ExpectNoError(err, "Failed to create %s role binding: %v", binding.GetName(), err)
 
+	}
+}
+
+func CheckVolumeModeOfPath(pod *v1.Pod, volMode v1.PersistentVolumeMode, path string) {
+	if volMode == v1.PersistentVolumeBlock {
+		// Check if block exists
+		VerifyExecInPodSucceed(pod, fmt.Sprintf("test -b %s", path))
+
+		// Double check that it's not directory
+		VerifyExecInPodFail(pod, fmt.Sprintf("test -d %s", path), 1)
+	} else {
+		// Check if directory exists
+		VerifyExecInPodSucceed(pod, fmt.Sprintf("test -d %s", path))
+
+		// Double check that it's not block
+		VerifyExecInPodFail(pod, fmt.Sprintf("test -b %s", path), 1)
+	}
+}
+
+func CheckReadWriteToPath(pod *v1.Pod, volMode v1.PersistentVolumeMode, path string) {
+	if volMode == v1.PersistentVolumeBlock {
+		// random -> file1
+		VerifyExecInPodSucceed(pod, "dd if=/dev/urandom of=/tmp/file1 bs=64 count=1")
+		// file1 -> dev (write to dev)
+		VerifyExecInPodSucceed(pod, fmt.Sprintf("dd if=/tmp/file1 of=%s bs=64 count=1", path))
+		// dev -> file2 (read from dev)
+		VerifyExecInPodSucceed(pod, fmt.Sprintf("dd if=%s of=/tmp/file2 bs=64 count=1", path))
+		// file1 == file2 (check contents)
+		VerifyExecInPodSucceed(pod, "diff /tmp/file1 /tmp/file2")
+		// Clean up temp files
+		VerifyExecInPodSucceed(pod, "rm -f /tmp/file1 /tmp/file2")
+
+		// Check that writing file to block volume fails
+		VerifyExecInPodFail(pod, fmt.Sprintf("echo 'Hello world.' > %s/file1.txt", path), 1)
+	} else {
+		// text -> file1 (write to file)
+		VerifyExecInPodSucceed(pod, fmt.Sprintf("echo 'Hello world.' > %s/file1.txt", path))
+		// grep file1 (read from file and check contents)
+		VerifyExecInPodSucceed(pod, fmt.Sprintf("grep 'Hello world.' %s/file1.txt", path))
+
+		// Check that writing to directory as block volume fails
+		VerifyExecInPodFail(pod, fmt.Sprintf("dd if=/dev/urandom of=%s bs=64 count=1", path), 1)
 	}
 }

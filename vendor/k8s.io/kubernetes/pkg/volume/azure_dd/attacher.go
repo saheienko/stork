@@ -17,7 +17,6 @@ limitations under the License.
 package azure_dd
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,7 +32,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/kubernetes/pkg/cloudprovider"
 	"k8s.io/kubernetes/pkg/cloudprovider/providers/azure"
-	"k8s.io/kubernetes/pkg/util/keymutex"
 	"k8s.io/kubernetes/pkg/util/mount"
 	"k8s.io/kubernetes/pkg/volume"
 	"k8s.io/kubernetes/pkg/volume/util"
@@ -52,8 +50,8 @@ type azureDiskAttacher struct {
 var _ volume.Attacher = &azureDiskAttacher{}
 var _ volume.Detacher = &azureDiskDetacher{}
 
-// acquire lock to get an lun number
-var getLunMutex = keymutex.NewKeyMutex()
+var _ volume.DeviceMounter = &azureDiskAttacher{}
+var _ volume.DeviceUnmounter = &azureDiskDetacher{}
 
 // Attach attaches a volume.Spec to an Azure VM referenced by NodeName, returning the disk's LUN
 func (a *azureDiskAttacher) Attach(spec *volume.Spec, nodeName types.NodeName) (string, error) {
@@ -61,12 +59,6 @@ func (a *azureDiskAttacher) Attach(spec *volume.Spec, nodeName types.NodeName) (
 	if err != nil {
 		glog.Warningf("failed to get azure disk spec (%v)", err)
 		return "", err
-	}
-
-	instanceid, err := a.cloud.InstanceID(context.TODO(), nodeName)
-	if err != nil {
-		glog.Warningf("failed to get azure instance id (%v)", err)
-		return "", fmt.Errorf("failed to get azure instance id for node %q (%v)", nodeName, err)
 	}
 
 	diskController, err := getDiskController(a.plugin.host)
@@ -79,30 +71,22 @@ func (a *azureDiskAttacher) Attach(spec *volume.Spec, nodeName types.NodeName) (
 		// Log error and continue with attach
 		glog.Warningf(
 			"Error checking if volume is already attached to current node (%q). Will continue and try attach anyway. err=%v",
-			instanceid, err)
+			nodeName, err)
 	}
 
 	if err == nil {
 		// Volume is already attached to node.
-		glog.V(4).Infof("Attach operation is successful. volume %q is already attached to node %q at lun %d.", volumeSource.DiskName, instanceid, lun)
+		glog.V(2).Infof("Attach operation is successful. volume %q is already attached to node %q at lun %d.", volumeSource.DiskName, nodeName, lun)
 	} else {
-		glog.V(4).Infof("GetDiskLun returned: %v. Initiating attaching volume %q to node %q.", err, volumeSource.DataDiskURI, nodeName)
-		getLunMutex.LockKey(instanceid)
-		defer getLunMutex.UnlockKey(instanceid)
+		glog.V(2).Infof("GetDiskLun returned: %v. Initiating attaching volume %q to node %q.", err, volumeSource.DataDiskURI, nodeName)
 
-		lun, err = diskController.GetNextDiskLun(nodeName)
-		if err != nil {
-			glog.Warningf("no LUN available for instance %q (%v)", nodeName, err)
-			return "", fmt.Errorf("all LUNs are used, cannot attach volume %q to instance %q (%v)", volumeSource.DiskName, instanceid, err)
-		}
-		glog.V(4).Infof("Trying to attach volume %q lun %d to node %q.", volumeSource.DataDiskURI, lun, nodeName)
 		isManagedDisk := (*volumeSource.Kind == v1.AzureManagedDisk)
-		err = diskController.AttachDisk(isManagedDisk, volumeSource.DiskName, volumeSource.DataDiskURI, nodeName, lun, compute.CachingTypes(*volumeSource.CachingMode))
+		err = diskController.AttachDisk(isManagedDisk, volumeSource.DiskName, volumeSource.DataDiskURI, nodeName, compute.CachingTypes(*volumeSource.CachingMode))
 		if err == nil {
-			glog.V(4).Infof("Attach operation successful: volume %q attached to node %q.", volumeSource.DataDiskURI, nodeName)
+			glog.V(2).Infof("Attach operation successful: volume %q attached to node %q.", volumeSource.DataDiskURI, nodeName)
 		} else {
-			glog.V(2).Infof("Attach volume %q to instance %q failed with %v", volumeSource.DataDiskURI, instanceid, err)
-			return "", fmt.Errorf("Attach volume %q to instance %q failed with %v", volumeSource.DiskName, instanceid, err)
+			glog.V(2).Infof("Attach volume %q to instance %q failed with %v", volumeSource.DataDiskURI, nodeName, err)
+			return "", fmt.Errorf("Attach volume %q to instance %q failed with %v", volumeSource.DiskName, nodeName, err)
 		}
 	}
 
@@ -282,23 +266,12 @@ func (d *azureDiskDetacher) Detach(diskURI string, nodeName types.NodeName) erro
 		return fmt.Errorf("invalid disk to detach: %q", diskURI)
 	}
 
-	instanceid, err := d.cloud.InstanceID(context.TODO(), nodeName)
-	if err != nil {
-		glog.Warningf("no instance id for node %q, skip detaching (%v)", nodeName, err)
-		return nil
-	}
-
-	glog.V(4).Infof("detach %v from node %q", diskURI, nodeName)
-
 	diskController, err := getDiskController(d.plugin.host)
 	if err != nil {
 		return err
 	}
 
-	getLunMutex.LockKey(instanceid)
-	defer getLunMutex.UnlockKey(instanceid)
-
-	err = diskController.DetachDiskByName("", diskURI, nodeName)
+	err = diskController.DetachDisk("", diskURI, nodeName)
 	if err != nil {
 		glog.Errorf("failed to detach azure disk %q, err %v", diskURI, err)
 	}
@@ -311,9 +284,9 @@ func (d *azureDiskDetacher) Detach(diskURI string, nodeName types.NodeName) erro
 func (detacher *azureDiskDetacher) UnmountDevice(deviceMountPath string) error {
 	err := util.UnmountPath(deviceMountPath, detacher.plugin.host.GetMounter(detacher.plugin.GetPluginName()))
 	if err == nil {
-		glog.V(4).Infof("azureDisk - Device %s was unmounted", deviceMountPath)
+		glog.V(2).Infof("azureDisk - Device %s was unmounted", deviceMountPath)
 	} else {
-		glog.Infof("azureDisk - Device %s failed to unmount with error: %s", deviceMountPath, err.Error())
+		glog.Warningf("azureDisk - Device %s failed to unmount with error: %s", deviceMountPath, err.Error())
 	}
 	return err
 }

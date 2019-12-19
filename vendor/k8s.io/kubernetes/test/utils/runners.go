@@ -139,6 +139,9 @@ type RCConfig struct {
 	// Node selector for pods in the RC.
 	NodeSelector map[string]string
 
+	// Tolerations for pods in the RC.
+	Tolerations []v1.Toleration
+
 	// Ports to declare in the container (map of name to containerPort).
 	Ports map[string]int
 	// Ports to declare in the container as host and container ports.
@@ -563,6 +566,7 @@ func (config *RCConfig) create() error {
 					},
 					DNSPolicy:                     *config.DNSPolicy,
 					NodeSelector:                  config.NodeSelector,
+					Tolerations:                   config.Tolerations,
 					TerminationGracePeriodSeconds: &one,
 					PriorityClassName:             config.PriorityClassName,
 				},
@@ -603,6 +607,9 @@ func (config *RCConfig) applyTo(template *v1.PodTemplateSpec) {
 		for k, v := range config.NodeSelector {
 			template.Spec.NodeSelector[k] = v
 		}
+	}
+	if config.Tolerations != nil {
+		template.Spec.Tolerations = append([]v1.Toleration{}, config.Tolerations...)
 	}
 	if config.Ports != nil {
 		for k, v := range config.Ports {
@@ -1019,7 +1026,7 @@ func MakePodSpec() v1.PodSpec {
 	return v1.PodSpec{
 		Containers: []v1.Container{{
 			Name:  "pause",
-			Image: "kubernetes/pause",
+			Image: "k8s.gcr.io/pause:3.1",
 			Ports: []v1.ContainerPort{{ContainerPort: 80}},
 			Resources: v1.ResourceRequirements{
 				Limits: v1.ResourceList{
@@ -1246,7 +1253,7 @@ type DaemonConfig struct {
 
 func (config *DaemonConfig) Run() error {
 	if config.Image == "" {
-		config.Image = "kubernetes/pause"
+		config.Image = "k8s.gcr.io/pause:3.1"
 	}
 	nameLabel := map[string]string{
 		"name": config.Name + "-daemon",

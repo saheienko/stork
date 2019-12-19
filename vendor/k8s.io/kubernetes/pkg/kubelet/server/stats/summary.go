@@ -91,47 +91,16 @@ func (sp *summaryProviderImpl) Get(updateStats bool) (*statsapi.Summary, error) 
 	}
 
 	nodeStats := statsapi.NodeStats{
-		NodeName:  node.Name,
-		CPU:       rootStats.CPU,
-		Memory:    rootStats.Memory,
-		Network:   networkStats,
-		StartTime: sp.systemBootTime,
-		Fs:        rootFsStats,
-		Runtime:   &statsapi.RuntimeStats{ImageFs: imageFsStats},
-		Rlimit:    rlimit,
+		NodeName:         node.Name,
+		CPU:              rootStats.CPU,
+		Memory:           rootStats.Memory,
+		Network:          networkStats,
+		StartTime:        sp.systemBootTime,
+		Fs:               rootFsStats,
+		Runtime:          &statsapi.RuntimeStats{ImageFs: imageFsStats},
+		Rlimit:           rlimit,
+		SystemContainers: sp.GetSystemContainersStats(nodeConfig, podStats, updateStats),
 	}
-
-	systemContainers := map[string]struct {
-		name             string
-		forceStatsUpdate bool
-		startTime        metav1.Time
-	}{
-		statsapi.SystemContainerKubelet: {name: nodeConfig.KubeletCgroupsName, forceStatsUpdate: false, startTime: sp.kubeletCreationTime},
-		statsapi.SystemContainerRuntime: {name: nodeConfig.RuntimeCgroupsName, forceStatsUpdate: false},
-		statsapi.SystemContainerMisc:    {name: nodeConfig.SystemCgroupsName, forceStatsUpdate: false},
-		statsapi.SystemContainerPods:    {name: sp.provider.GetPodCgroupRoot(), forceStatsUpdate: updateStats},
-	}
-	for sys, cont := range systemContainers {
-		// skip if cgroup name is undefined (not all system containers are required)
-		if cont.name == "" {
-			continue
-		}
-		s, _, err := sp.provider.GetCgroupStats(cont.name, cont.forceStatsUpdate)
-		if err != nil {
-			glog.Errorf("Failed to get system container stats for %q: %v", cont.name, err)
-			continue
-		}
-		// System containers don't have a filesystem associated with them.
-		s.Logs, s.Rootfs = nil, nil
-		s.Name = sys
-		// if we know the start time of a system container, use that instead of the start time provided by cAdvisor
-		if !cont.startTime.IsZero() {
-			s.StartTime = cont.startTime
-		}
-
-		nodeStats.SystemContainers = append(nodeStats.SystemContainers, *s)
-	}
-
 	summary := statsapi.Summary{
 		Node: nodeStats,
 		Pods: podStats,

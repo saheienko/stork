@@ -22,7 +22,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/golang/glog"
 	"k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -45,6 +44,8 @@ import (
 	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/controller"
 	"k8s.io/kubernetes/pkg/util/metrics"
+
+	"github.com/golang/glog"
 )
 
 const (
@@ -68,10 +69,6 @@ const (
 	// This field is deprecated. v1.Service.PublishNotReadyAddresses will replace it
 	// subsequent releases.  It will be removed no sooner than 1.13.
 	TolerateUnreadyEndpointsAnnotation = "service.alpha.kubernetes.io/tolerate-unready-endpoints"
-)
-
-var (
-	keyFunc = cache.DeletionHandlingMetaNamespaceKeyFunc
 )
 
 // NewEndpointController returns a new *EndpointController.
@@ -114,7 +111,6 @@ func NewEndpointController(podInformer coreinformers.PodInformer, serviceInforme
 
 	e.eventBroadcaster = broadcaster
 	e.eventRecorder = recorder
-
 	return e
 }
 
@@ -190,7 +186,7 @@ func (e *EndpointController) getPodServiceMemberships(pod *v1.Pod) (sets.String,
 		return set, nil
 	}
 	for i := range services {
-		key, err := keyFunc(services[i])
+		key, err := controller.KeyFunc(services[i])
 		if err != nil {
 			return nil, err
 		}
@@ -346,7 +342,7 @@ func (e *EndpointController) deletePod(obj interface{}) {
 
 // obj could be an *v1.Service, or a DeletionFinalStateUnknown marker item.
 func (e *EndpointController) enqueueService(obj interface{}) {
-	key, err := keyFunc(obj)
+	key, err := controller.KeyFunc(obj)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("Couldn't get key for object %+v: %v", obj, err))
 		return
@@ -571,7 +567,7 @@ func (e *EndpointController) checkLeftoverEndpoints() {
 			// as leader-election only have endpoints without service
 			continue
 		}
-		key, err := keyFunc(ep)
+		key, err := controller.KeyFunc(ep)
 		if err != nil {
 			utilruntime.HandleError(fmt.Errorf("Unable to get key for endpoint %#v", ep))
 			continue

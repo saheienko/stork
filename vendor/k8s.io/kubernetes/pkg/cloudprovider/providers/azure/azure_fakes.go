@@ -898,15 +898,15 @@ func (f *fakeVMSet) GetVMSetNames(service *v1.Service, nodes []*v1.Node) (availa
 	return nil, fmt.Errorf("unimplemented")
 }
 
-func (f *fakeVMSet) EnsureHostsInPool(serviceName string, nodes []*v1.Node, backendPoolID string, vmSetName string, isInternal bool) error {
+func (f *fakeVMSet) EnsureHostsInPool(service *v1.Service, nodes []*v1.Node, backendPoolID string, vmSetName string, isInternal bool) error {
 	return fmt.Errorf("unimplemented")
 }
 
-func (f *fakeVMSet) EnsureHostInPool(serviceName, nodeName, backendPoolID, vmSetName string, isInternal bool) error {
+func (f *fakeVMSet) EnsureHostInPool(service *v1.Service, nodeName types.NodeName, backendPoolID string, vmSetName string, isInternal bool) error {
 	return fmt.Errorf("unimplemented")
 }
 
-func (f *fakeVMSet) EnsureBackendPoolDeleted(serviceName, backendPoolID, vmSetName string, backendAddressPools *[]network.BackendAddressPool) error {
+func (f *fakeVMSet) EnsureBackendPoolDeleted(service *v1.Service, backendPoolID, vmSetName string, backendAddressPools *[]network.BackendAddressPool) error {
 	return fmt.Errorf("unimplemented")
 }
 
@@ -914,10 +914,14 @@ func (f *fakeVMSet) AttachDisk(isManagedDisk bool, diskName, diskURI string, nod
 	return fmt.Errorf("unimplemented")
 }
 
-func (f *fakeVMSet) DetachDiskByName(diskName, diskURI string, nodeName types.NodeName) error {
-	return fmt.Errorf("unimplemented")
+func (f *fakeVMSet) DetachDisk(diskName, diskURI string, nodeName types.NodeName) (*http.Response, error) {
+	return nil, fmt.Errorf("unimplemented")
 }
 
 func (f *fakeVMSet) GetDataDisks(nodeName types.NodeName) ([]compute.DataDisk, error) {
 	return nil, fmt.Errorf("unimplemented")
+}
+
+func (f *fakeVMSet) GetPowerStatusByNodeName(name string) (string, error) {
+	return "", fmt.Errorf("unimplemented")
 }

@@ -17,6 +17,6 @@ var (
 // +k8s:deepcopy-gen=package,register
 // +groupName=stork.libopenstorage.org
 
-func AddToScheme(scheme *runtime.Scheme) {
-	SchemeBuilder.AddToScheme(scheme)
+func AddToScheme(scheme *runtime.Scheme) error {
+	return SchemeBuilder.AddToScheme(scheme)
 }

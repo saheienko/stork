@@ -29,12 +29,8 @@ import (
 	core_v1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/leaderelection"
-	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
-	componentconfig "k8s.io/kubernetes/pkg/apis/componentconfig/v1alpha1"
-	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
@@ -191,79 +187,25 @@ func run(c *cli.Context) {
 		}
 	}
 
-	runFunc := func(_ <-chan struct{}) {
-		runStork(d, recorder, c)
-	}
-
+	mgrOpts := manager.Options{}
 	if c.BoolT("leader-elect") {
-
-		lockObjectName := c.String("lock-object-name")
-		lockObjectNamespace := c.String("lock-object-namespace")
-
-		id, err := os.Hostname()
-		if err != nil {
-			log.Fatalf("Error getting hostname: %v", err)
-		}
-
-		lockConfig := resourcelock.ResourceLockConfig{
-			Identity:      id,
-			EventRecorder: recorder,
-		}
-
-		resourceLock, err := resourcelock.New(
-			resourcelock.ConfigMapsResourceLock,
-			lockObjectNamespace,
-			lockObjectName,
-			k8sClient.CoreV1(),
-			lockConfig)
-		if err != nil {
-			log.Fatalf("Error creating resource lock: %v", err)
-		}
-
-		defaultConfig := &componentconfig.LeaderElectionConfiguration{}
-		componentconfig.SetDefaults_LeaderElectionConfiguration(defaultConfig)
-
-		leaderElectionConfig := leaderelection.LeaderElectionConfig{
-			Lock:          resourceLock,
-			LeaseDuration: defaultConfig.LeaseDuration.Duration,
-			RenewDeadline: defaultConfig.RenewDeadline.Duration,
-			RetryPeriod:   defaultConfig.RetryPeriod.Duration,
-
-			Callbacks: leaderelection.LeaderCallbacks{
-				OnStartedLeading: runFunc,
-				OnStoppedLeading: func() {
-					log.Fatalf("Stork lost master")
-				},
-			},
-		}
-		leaderElector, err := leaderelection.NewLeaderElector(leaderElectionConfig)
-		if err != nil {
-			log.Fatalf("Error creating leader elector: %v", err)
-		}
-
-		leaderElector.Run()
-	} else {
-		runFunc(nil)
+		mgrOpts.LeaderElection = true
+		mgrOpts.LeaderElectionID = c.String("lock-object-name")
+		mgrOpts.LeaderElectionNamespace = c.String("lock-object-namespace")
 	}
+
+	// Create operator-sdk manager that will manage all controllers.
+	mgr, err := manager.New(config, mgrOpts)
+	if err != nil {
+		log.Error(err)
+	}
+
+	runStork(mgr, d, recorder, c)
 }
 
-func runStork(d volume.Driver, recorder record.EventRecorder, c *cli.Context) {
+func runStork(mgr manager.Manager, d volume.Driver, recorder record.EventRecorder, c *cli.Context) {
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
-
-	// Get a config to talk to the apiserver
-	cfg, err := config.GetConfig()
-	if err != nil {
-		log.Error(err)
-	}
-
-	// Create a new Cmd to provide shared dependencies and start components
-	mgr, err := manager.New(cfg, manager.Options{
-		//MapperProvider: restmapper.NewDynamicRESTMapper,
-	})
-	if err != nil {
-		log.Error(err)
-	}
 
 	if err := rule.Init(); err != nil {
 		log.Fatalf("Error initializing rule: %v", err)

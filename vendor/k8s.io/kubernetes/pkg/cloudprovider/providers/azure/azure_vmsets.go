@@ -17,6 +17,8 @@ limitations under the License.
 package azure
 
 import (
+	"net/http"
+
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-03-01/compute"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2017-09-01/network"
 
@@ -54,17 +56,20 @@ type VMSet interface {
 	GetVMSetNames(service *v1.Service, nodes []*v1.Node) (availabilitySetNames *[]string, err error)
 	// EnsureHostsInPool ensures the given Node's primary IP configurations are
 	// participating in the specified LoadBalancer Backend Pool.
-	EnsureHostsInPool(serviceName string, nodes []*v1.Node, backendPoolID string, vmSetName string, isInternal bool) error
+	EnsureHostsInPool(service *v1.Service, nodes []*v1.Node, backendPoolID string, vmSetName string, isInternal bool) error
 	// EnsureHostInPool ensures the given VM's Primary NIC's Primary IP Configuration is
 	// participating in the specified LoadBalancer Backend Pool.
-	EnsureHostInPool(serviceName, nodeName, backendPoolID string, vmSetName string, isInternal bool) error
+	EnsureHostInPool(service *v1.Service, nodeName types.NodeName, backendPoolID string, vmSetName string, isInternal bool) error
 	// EnsureBackendPoolDeleted ensures the loadBalancer backendAddressPools deleted from the specified nodes.
-	EnsureBackendPoolDeleted(serviceName, backendPoolID, vmSetName string, backendAddressPools *[]network.BackendAddressPool) error
+	EnsureBackendPoolDeleted(service *v1.Service, backendPoolID, vmSetName string, backendAddressPools *[]network.BackendAddressPool) error
 
 	// AttachDisk attaches a vhd to vm. The vhd must exist, can be identified by diskName, diskURI, and lun.
 	AttachDisk(isManagedDisk bool, diskName, diskURI string, nodeName types.NodeName, lun int32, cachingMode compute.CachingTypes) error
-	// DetachDiskByName detaches a vhd from host. The vhd can be identified by diskName or diskURI.
-	DetachDiskByName(diskName, diskURI string, nodeName types.NodeName) error
+	// DetachDisk detaches a vhd from host. The vhd can be identified by diskName or diskURI.
+	DetachDisk(diskName, diskURI string, nodeName types.NodeName) (*http.Response, error)
 	// GetDataDisks gets a list of data disks attached to the node.
 	GetDataDisks(nodeName types.NodeName) ([]compute.DataDisk, error)
+
+	// GetPowerStatusByNodeName returns the power state of the specified node.
+	GetPowerStatusByNodeName(name string) (string, error)
 }

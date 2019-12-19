@@ -1362,7 +1362,7 @@
   version = "2019.1.1"
 
 [[projects]]
-  digest = "1:f11e5753e619f411a51a49d60d39b2bc4da6766f5f0af2e2291daa6a3d9385d5"
+  digest = "1:b3f8152a68d73095a40fdcf329a93fc42e8eadb3305171df23fdb6b4e41a6417"
   name = "k8s.io/api"
   packages = [
     "admission/v1beta1",
@@ -1377,10 +1377,12 @@
     "authorization/v1beta1",
     "autoscaling/v1",
     "autoscaling/v2beta1",
+    "autoscaling/v2beta2",
     "batch/v1",
     "batch/v1beta1",
     "batch/v2alpha1",
     "certificates/v1beta1",
+    "coordination/v1beta1",
     "core/v1",
     "events/v1beta1",
     "extensions/v1beta1",
@@ -1398,11 +1400,11 @@
     "storage/v1beta1",
   ]
   pruneopts = "NT"
-  revision = "2d6f90ab1293a1fb871cf149423ebb72aa7423aa"
-  version = "kubernetes-1.11.2"
+  revision = "b503174bad5991eb66f18247f52e41c3258f6348"
+  version = "kubernetes-1.12.3"
 
 [[projects]]
-  digest = "1:117a407949aaaad9f7fbe3da8d6c2055f2c223ac0cbebd39f47ff71899622a91"
+  digest = "1:82b4765488fd2a8bcefb93e196fdbfe342d33b16ae073a6f51bb4fb13e81e102"
   name = "k8s.io/apiextensions-apiserver"
   packages = [
     "pkg/apis/apiextensions",
@@ -1413,11 +1415,11 @@
     "pkg/features",
   ]
   pruneopts = "NT"
-  revision = "408db4a50408e2149acbd657bceb2480c13cb0a4"
-  version = "kubernetes-1.11.2"
+  revision = "0cd23ebeb6882bd1cdc2cb15fc7b2d72e8a86a5b"
+  version = "kubernetes-1.12.3"
 
 [[projects]]
-  digest = "1:b07bf863262aae765494d60f0d524483f211b29f9bb27d445a79c13af8676bf2"
+  digest = "1:868de7cbaa0ecde6dc231c1529a10ae01bb05916095c0c992186e2a5cac57e79"
   name = "k8s.io/apimachinery"
   packages = [
     "pkg/api/equality",
@@ -1458,6 +1460,7 @@
     "pkg/util/intstr",
     "pkg/util/json",
     "pkg/util/mergepatch",
+    "pkg/util/naming",
     "pkg/util/net",
     "pkg/util/rand",
     "pkg/util/remotecommand",
@@ -1476,11 +1479,11 @@
     "third_party/forked/golang/reflect",
   ]
   pruneopts = "NT"
-  revision = "103fd098999dc9c0c88536f5c9ad2e5da39373ae"
-  version = "kubernetes-1.11.2"
+  revision = "eddba98df674a16931d2d4ba75edc3a389bf633a"
+  version = "kubernetes-1.12.3"
 
 [[projects]]
-  digest = "1:685f087a132849e00155225cbefb16d2121d70362e8d4b8f33afd6d80c29acbd"
+  digest = "1:711f4e3a1d7469568b65dd66d04457b086105438f3558aea7881e6b99f0dbc90"
   name = "k8s.io/apiserver"
   packages = [
     "pkg/apis/audit",
@@ -1492,11 +1495,23 @@
     "pkg/util/feature",
   ]
   pruneopts = "NT"
-  revision = "7e0c011528eaf3546e4c22dbe7dd7446309f76ae"
-  version = "kubernetes-1.11.9"
+  revision = "92fdef3a232a23afb9644f6151119b5961b9feab"
+  version = "kubernetes-1.12.3"
 
 [[projects]]
-  digest = "1:1689a49a3ebc6e379849181f1e0899fccf143cab47586078721818bdcdb712bc"
+  digest = "1:7991e5074de01462e0cf6ef77060895b50e9026d16152a6e925cb99b67a1f8ae"
+  name = "k8s.io/cli-runtime"
+  packages = [
+    "pkg/genericclioptions",
+    "pkg/genericclioptions/printers",
+    "pkg/genericclioptions/resource",
+  ]
+  pruneopts = "NT"
+  revision = "2bcf9b68aa6e2c7f2092a0f60e2d11d339af9c83"
+  version = "kubernetes-1.12.3"
+
+[[projects]]
+  digest = "1:00089f60de414edb1a51e63efde2480ce87c95d2cb3536ea240afe483905d736"
   name = "k8s.io/client-go"
   packages = [
     "discovery",
@@ -1528,6 +1543,8 @@
     "kubernetes/typed/autoscaling/v1/fake",
     "kubernetes/typed/autoscaling/v2beta1",
     "kubernetes/typed/autoscaling/v2beta1/fake",
+    "kubernetes/typed/autoscaling/v2beta2",
+    "kubernetes/typed/autoscaling/v2beta2/fake",
     "kubernetes/typed/batch/v1",
     "kubernetes/typed/batch/v1/fake",
     "kubernetes/typed/batch/v1beta1",
@@ -1536,6 +1553,8 @@
     "kubernetes/typed/batch/v2alpha1/fake",
     "kubernetes/typed/certificates/v1beta1",
     "kubernetes/typed/certificates/v1beta1/fake",
+    "kubernetes/typed/coordination/v1beta1",
+    "kubernetes/typed/coordination/v1beta1/fake",
     "kubernetes/typed/core/v1",
     "kubernetes/typed/core/v1/fake",
     "kubernetes/typed/events/v1beta1",
@@ -1564,8 +1583,6 @@
     "kubernetes/typed/storage/v1alpha1/fake",
     "kubernetes/typed/storage/v1beta1",
     "kubernetes/typed/storage/v1beta1/fake",
-    "listers/apps/v1",
-    "listers/core/v1",
     "pkg/apis/clientauthentication",
     "pkg/apis/clientauthentication/v1alpha1",
     "pkg/apis/clientauthentication/v1beta1",
@@ -1603,6 +1620,7 @@
     "tools/record",
     "tools/reference",
     "tools/remotecommand",
+    "tools/watch",
     "transport",
     "transport/spdy",
     "util/buffer",
@@ -1617,11 +1635,11 @@
     "util/workqueue",
   ]
   pruneopts = "NT"
-  revision = "1f13a808da65775f22cbf47862c4e5898d8f4ca1"
-  version = "kubernetes-1.11.2"
+  revision = "d082d5923d3cc0bfbb066ee5fbdea3d0ca79acf8"
+  version = "kubernetes-1.12.3"
 
 [[projects]]
-  digest = "1:8ab487a323486c8bbbaa3b689850487fdccc6cbea8690620e083b2d230a4447e"
+  digest = "1:4e2addcdbe0330f43800c1fcb905fc7a21b86415dfcca619e5c606c87257af1b"
   name = "k8s.io/code-generator"
   packages = [
     "cmd/client-gen",
@@ -1650,7 +1668,7 @@
     "pkg/util",
   ]
   pruneopts = "T"
-  revision = "6702109cc68eb6fe6350b83e14407c8d7309fd1a"
+  revision = "3dcf91f64f638563e5106f21f50c31fa361c918d"
 
 [[projects]]
   branch = "master"
@@ -1694,7 +1712,7 @@
   revision = "0cf8f7e6ed1d2e3d47d02e3b6e559369af24d803"
 
 [[projects]]
-  digest = "1:aac66094f5d1c4b44d76ee34ef2dff0333ce1163d2de1453f580d10a5da92224"
+  digest = "1:897e959e26062b41516b336f819faac7f21a81665f599402ad2a7a081c5ecff4"
   name = "k8s.io/kubernetes"
   packages = [
     "pkg/api/events",
@@ -1725,6 +1743,7 @@
     "pkg/apis/autoscaling/install",
     "pkg/apis/autoscaling/v1",
     "pkg/apis/autoscaling/v2beta1",
+    "pkg/apis/autoscaling/v2beta2",
     "pkg/apis/batch",
     "pkg/apis/batch/install",
     "pkg/apis/batch/v1",
@@ -1733,9 +1752,9 @@
     "pkg/apis/certificates",
     "pkg/apis/certificates/install",
     "pkg/apis/certificates/v1beta1",
-    "pkg/apis/componentconfig",
-    "pkg/apis/componentconfig/install",
-    "pkg/apis/componentconfig/v1alpha1",
+    "pkg/apis/coordination",
+    "pkg/apis/coordination/install",
+    "pkg/apis/coordination/v1beta1",
     "pkg/apis/core",
     "pkg/apis/core/helper",
     "pkg/apis/core/helper/qos",
@@ -1784,6 +1803,7 @@
     "pkg/client/clientset_generated/internalclientset/typed/autoscaling/internalversion",
     "pkg/client/clientset_generated/internalclientset/typed/batch/internalversion",
     "pkg/client/clientset_generated/internalclientset/typed/certificates/internalversion",
+    "pkg/client/clientset_generated/internalclientset/typed/coordination/internalversion",
     "pkg/client/clientset_generated/internalclientset/typed/core/internalversion",
     "pkg/client/clientset_generated/internalclientset/typed/events/internalversion",
     "pkg/client/clientset_generated/internalclientset/typed/extensions/internalversion",
@@ -1806,9 +1826,6 @@
     "pkg/kubectl/cmd/util/openapi",
     "pkg/kubectl/cmd/util/openapi/testing",
     "pkg/kubectl/cmd/util/openapi/validation",
-    "pkg/kubectl/genericclioptions",
-    "pkg/kubectl/genericclioptions/printers",
-    "pkg/kubectl/genericclioptions/resource",
     "pkg/kubectl/scheme",
     "pkg/kubectl/util",
     "pkg/kubectl/util/hash",
@@ -1839,40 +1856,43 @@
     "pkg/util/net/sets",
     "pkg/util/node",
     "pkg/util/parsers",
-    "pkg/util/pointer",
     "pkg/util/slice",
     "pkg/util/taints",
     "pkg/util/version",
     "pkg/version",
   ]
   pruneopts = "NT"
-  revision = "7a578febe155a7366767abce40d8a16795a96371"
-  version = "v1.11.10"
+  revision = "e3c134023df5dea457638b614ee17ef234dc34a6"
+  version = "v1.12.10"
 
 [[projects]]
   branch = "master"
   digest = "1:60a5a05db052f15f721cef468df4d3fee5fe66cd7790defb4b4bbe65fedd61c7"
   name = "k8s.io/utils"
-  packages = ["exec"]
+  packages = [
+    "exec",
+    "pointer",
+  ]
   pruneopts = "NT"
   revision = "ed37f7428a91fc2a81070808937195dcd46d320e"
 
 [[projects]]
-  digest = "1:a8fb38656b3b59a487e3f74c7d9ad4d90c4f7a3b45413284311f9751b6905448"
+  digest = "1:e03ddaf9f31bccbbb8c33eabad2c85025a95ca98905649fd744e0a54c630a064"
   name = "sigs.k8s.io/controller-runtime"
   packages = [
     "pkg/cache",
     "pkg/cache/internal",
     "pkg/client",
     "pkg/client/apiutil",
-    "pkg/client/config",
     "pkg/controller",
     "pkg/event",
     "pkg/handler",
     "pkg/internal/controller",
+    "pkg/internal/controller/metrics",
     "pkg/internal/recorder",
     "pkg/leaderelection",
     "pkg/manager",
+    "pkg/metrics",
     "pkg/patch",
     "pkg/predicate",
     "pkg/reconcile",
@@ -1887,8 +1907,8 @@
     "pkg/webhook/types",
   ]
   pruneopts = "NT"
-  revision = "53fc44b56078cd095b11bd44cfa0288ee4cf718f"
-  version = "v0.1.4"
+  revision = "c63ebda0bf4be5f0a8abd4003e4ea546032545ba"
+  version = "v0.1.8"
 
 [[projects]]
   branch = "master"
@@ -1974,11 +1994,14 @@
     "k8s.io/apimachinery/pkg/runtime/schema",
     "k8s.io/apimachinery/pkg/runtime/serializer",
     "k8s.io/apimachinery/pkg/types",
+    "k8s.io/apimachinery/pkg/util/runtime",
     "k8s.io/apimachinery/pkg/util/strategicpatch",
     "k8s.io/apimachinery/pkg/util/uuid",
     "k8s.io/apimachinery/pkg/util/wait",
     "k8s.io/apimachinery/pkg/watch",
     "k8s.io/apiserver/pkg/authentication/serviceaccount",
+    "k8s.io/cli-runtime/pkg/genericclioptions",
+    "k8s.io/cli-runtime/pkg/genericclioptions/resource",
     "k8s.io/client-go/discovery",
     "k8s.io/client-go/discovery/fake",
     "k8s.io/client-go/dynamic",
@@ -1992,8 +2015,6 @@
     "k8s.io/client-go/tools/cache",
     "k8s.io/client-go/tools/clientcmd",
     "k8s.io/client-go/tools/clientcmd/api",
-    "k8s.io/client-go/tools/leaderelection",
-    "k8s.io/client-go/tools/leaderelection/resourcelock",
     "k8s.io/client-go/tools/record",
     "k8s.io/client-go/util/flowcontrol",
     "k8s.io/code-generator/cmd/client-gen",
@@ -2005,15 +2026,12 @@
     "k8s.io/code-generator/cmd/openapi-gen",
     "k8s.io/gengo/args",
     "k8s.io/kubernetes/pkg/api/legacyscheme",
-    "k8s.io/kubernetes/pkg/apis/componentconfig/v1alpha1",
     "k8s.io/kubernetes/pkg/apis/core",
     "k8s.io/kubernetes/pkg/apis/core/v1",
     "k8s.io/kubernetes/pkg/apis/core/v1/helper",
     "k8s.io/kubernetes/pkg/apis/core/validation",
     "k8s.io/kubernetes/pkg/kubectl/cmd/testing",
     "k8s.io/kubernetes/pkg/kubectl/cmd/util",
-    "k8s.io/kubernetes/pkg/kubectl/genericclioptions",
-    "k8s.io/kubernetes/pkg/kubectl/genericclioptions/resource",
     "k8s.io/kubernetes/pkg/kubelet/apis",
     "k8s.io/kubernetes/pkg/printers",
     "k8s.io/kubernetes/pkg/registry/core/service/portallocator",
@@ -2021,7 +2039,6 @@
     "k8s.io/kubernetes/pkg/scheduler/api",
     "k8s.io/kubernetes/pkg/util/node",
     "sigs.k8s.io/controller-runtime/pkg/client",
-    "sigs.k8s.io/controller-runtime/pkg/client/config",
     "sigs.k8s.io/controller-runtime/pkg/controller",
     "sigs.k8s.io/controller-runtime/pkg/handler",
     "sigs.k8s.io/controller-runtime/pkg/manager",

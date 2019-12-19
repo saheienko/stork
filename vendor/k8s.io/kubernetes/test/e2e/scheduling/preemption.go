@@ -333,7 +333,7 @@ var _ = SIGDescribe("SchedulerPreemption [Serial]", func() {
 	})
 })
 
-var _ = SIGDescribe("PodPriorityResolution [Serial] [Feature:PodPreemption]", func() {
+var _ = SIGDescribe("PodPriorityResolution [Serial]", func() {
 	var cs clientset.Interface
 	var ns string
 	f := framework.NewDefaultFramework("sched-pod-priority")

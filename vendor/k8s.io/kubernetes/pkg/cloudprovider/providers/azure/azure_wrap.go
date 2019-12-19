@@ -19,6 +19,7 @@ package azure
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -26,7 +27,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2017-09-01/network"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/golang/glog"
-
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/kubernetes/pkg/cloudprovider"
 )
@@ -36,6 +36,8 @@ var (
 	lbCacheTTL  = 2 * time.Minute
 	nsgCacheTTL = 2 * time.Minute
 	rtCacheTTL  = 2 * time.Minute
+
+	azureNodeProviderIDRE = regexp.MustCompile(`^azure:///subscriptions/(?:.*)/resourceGroups/(?:.*)/providers/Microsoft.Compute/(?:.*)`)
 )
 
 // checkExistsFromError inspects an error and returns a true if err is nil,
@@ -202,7 +204,13 @@ func (az *Cloud) newVMCache() (*timedCache, error) {
 		// Consider adding separate parameter for controlling 'InstanceView' once node update issue #56276 is fixed
 		ctx, cancel := getContextWithCancel()
 		defer cancel()
-		vm, err := az.VirtualMachinesClient.Get(ctx, az.ResourceGroup, key, compute.InstanceView)
+
+		resourceGroup, err := az.GetNodeResourceGroup(key)
+		if err != nil {
+			return nil, err
+		}
+
+		vm, err := az.VirtualMachinesClient.Get(ctx, resourceGroup, key, compute.InstanceView)
 		exists, message, realErr := checkResourceExistsFromError(err)
 		if realErr != nil {
 			return nil, realErr
@@ -297,6 +305,24 @@ func (az *Cloud) disableLoadBalancerOutboundSNAT() bool {
 	}
 
 	return *az.DisableOutboundSNAT
+}
+
+// IsNodeUnmanaged returns true if the node is not managed by Azure cloud provider.
+// Those nodes includes on-prem or VMs from other clouds. They will not be added to load balancer
+// backends. Azure routes and managed disks are also not supported for them.
+func (az *Cloud) IsNodeUnmanaged(nodeName string) (bool, error) {
+	unmanagedNodes, err := az.GetUnmanagedNodes()
+	if err != nil {
+		return false, err
+	}
+
+	return unmanagedNodes.Has(nodeName), nil
+}
+
+// IsNodeUnmanagedByProviderID returns true if the node is not managed by Azure cloud provider.
+// All managed node's providerIDs are in format 'azure:///subscriptions/<id>/resourceGroups/<rg>/providers/Microsoft.Compute/.*'
+func (az *Cloud) IsNodeUnmanagedByProviderID(providerID string) bool {
+	return !azureNodeProviderIDRE.Match([]byte(providerID))
 }
 
 // isBackendPoolOnSameLB checks whether newBackendPoolID is on the same load balancer as existingBackendPools.

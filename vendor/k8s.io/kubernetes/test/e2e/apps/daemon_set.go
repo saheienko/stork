@@ -24,8 +24,7 @@ import (
 
 	apps "k8s.io/api/apps/v1"
 	"k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	apierrs "k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -94,7 +93,7 @@ var _ = SIGDescribe("Daemon set [Serial]", func() {
 
 	f = framework.NewDefaultFramework("daemonsets")
 
-	image := framework.ServeHostnameImage
+	image := NginxImage
 	dsName := "daemon-set"
 
 	var ns string
@@ -351,8 +350,15 @@ var _ = SIGDescribe("Daemon set [Serial]", func() {
 		ds, err = c.AppsV1().DaemonSets(ns).Patch(dsName, types.StrategicMergePatchType, []byte(patch))
 		Expect(err).NotTo(HaveOccurred())
 
+		// Time to complete the rolling upgrade is proportional to the number of nodes in the cluster.
+		// Get the number of nodes, and set the timeout appropriately.
+		nodes, err := c.CoreV1().Nodes().List(metav1.ListOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		nodeCount := len(nodes.Items)
+		retryTimeout := dsRetryTimeout + time.Duration(nodeCount*30)*time.Second
+
 		By("Check that daemon pods images are updated.")
-		err = wait.PollImmediate(dsRetryPeriod, dsRetryTimeout, checkDaemonPodsImageAndAvailability(c, ds, RedisImage, 1))
+		err = wait.PollImmediate(dsRetryPeriod, retryTimeout, checkDaemonPodsImageAndAvailability(c, ds, RedisImage, 1))
 		Expect(err).NotTo(HaveOccurred())
 
 		By("Check that daemon pods are still running on every node of the cluster.")
@@ -550,7 +556,7 @@ func setDaemonSetNodeLabels(c clientset.Interface, nodeName string, labels map[s
 			newLabels, _ = separateDaemonSetNodeLabels(newNode.Labels)
 			return true, err
 		}
-		if se, ok := err.(*apierrs.StatusError); ok && se.ErrStatus.Reason == metav1.StatusReasonConflict {
+		if se, ok := err.(*apierrors.StatusError); ok && se.ErrStatus.Reason == metav1.StatusReasonConflict {
 			framework.Logf("failed to update node due to resource version conflict")
 			return false, nil
 		}
@@ -764,7 +770,7 @@ func curHistory(historyList *apps.ControllerRevisionList, ds *apps.DaemonSet) *a
 func waitFailedDaemonPodDeleted(c clientset.Interface, pod *v1.Pod) func() (bool, error) {
 	return func() (bool, error) {
 		if _, err := c.CoreV1().Pods(pod.Namespace).Get(pod.Name, metav1.GetOptions{}); err != nil {
-			if errors.IsNotFound(err) {
+			if apierrors.IsNotFound(err) {
 				return true, nil
 			}
 			return false, fmt.Errorf("failed to get failed daemon pod %q: %v", pod.Name, err)
