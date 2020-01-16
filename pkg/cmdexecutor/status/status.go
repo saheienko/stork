@@ -3,9 +3,10 @@ package status
 import (
 	"fmt"
 
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/libopenstorage/stork/pkg/k8s"
+	"github.com/operator-framework/operator-sdk/pkg/sdk"
 	"github.com/sirupsen/logrus"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -22,36 +23,29 @@ func Persist(key, statusToPersist string) error {
 		return fmt.Errorf("no key provided to persist status")
 	}
 
-	cm, err := k8s.Instance().GetConfigMap(statusConfigMapName, meta_v1.NamespaceSystem)
+	cm, err := k8s.GetConfigMap(statusConfigMapName, meta_v1.NamespaceSystem)
 	if err != nil {
-		if errors.IsNotFound(err) {
-			// create one
-			defaultData := map[string]string{
-				key: "",
-			}
-			cm = &v1.ConfigMap{
-				ObjectMeta: meta_v1.ObjectMeta{
-					Namespace: meta_v1.NamespaceSystem,
-					Name:      statusConfigMapName,
-				},
-				Data: defaultData,
-			}
-			cm, err = k8s.Instance().CreateConfigMap(cm)
-			if err != nil {
-				return err
-			}
-		} else {
+		if !errors.IsNotFound(err) {
+			return err
+		}
+		// create one
+		defaultData := map[string]string{
+			key: "",
+		}
+		cm = &v1.ConfigMap{
+			ObjectMeta: meta_v1.ObjectMeta{
+				Namespace: meta_v1.NamespaceSystem,
+				Name:      statusConfigMapName,
+			},
+			Data: defaultData,
+		}
+		if err = sdk.Create(cm); err != nil {
 			return err
 		}
 	}
 
 	cm.Data[key] = statusToPersist
-	_, err = k8s.Instance().UpdateConfigMap(cm)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return sdk.Update(cm)
 }
 
 // Get fetches the status using the given key from the config map
@@ -60,7 +54,7 @@ func Get(key string) (string, error) {
 		return "", fmt.Errorf("no key provided to get status")
 	}
 
-	cm, err := k8s.Instance().GetConfigMap(statusConfigMapName, meta_v1.NamespaceSystem)
+	cm, err := k8s.GetConfigMap(statusConfigMapName, meta_v1.NamespaceSystem)
 	if err != nil {
 		return "", err
 	}
@@ -73,8 +67,7 @@ func Get(key string) (string, error) {
 	logrus.Errorf("%v cmd executor failed because: %s", key, status)
 
 	delete(cm.Data, key)
-	_, cmUpdateErr := k8s.Instance().UpdateConfigMap(cm)
-	if cmUpdateErr != nil {
+	if cmUpdateErr := sdk.Update(cm); cmUpdateErr != nil {
 		logrus.Warnf("failed to cleanup command executor status config map due to: %v", cmUpdateErr)
 	}
 	return status, nil

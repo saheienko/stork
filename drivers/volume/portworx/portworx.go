@@ -33,11 +33,11 @@ import (
 	stork_crd "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
 	applicationcontrollers "github.com/libopenstorage/stork/pkg/applicationmanager/controllers"
 	"github.com/libopenstorage/stork/pkg/errors"
+	"github.com/libopenstorage/stork/pkg/k8s"
 	"github.com/libopenstorage/stork/pkg/k8sutils"
 	"github.com/libopenstorage/stork/pkg/log"
 	"github.com/libopenstorage/stork/pkg/snapshot"
 	snapshotcontrollers "github.com/libopenstorage/stork/pkg/snapshot/controllers"
-	"github.com/portworx/sched-ops/k8s"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -282,12 +282,12 @@ func (p *portworx) initPortworxClients() error {
 	}
 
 	var scheme string
-	svc, err := k8s.Instance().GetService(serviceName, namespace)
-	if err == nil {
-		endpoint = svc.Spec.ClusterIP
-	} else {
+
+	svc, err := k8s.GetService(serviceName, namespace)
+	if err != nil {
 		return fmt.Errorf("failed to get k8s service spec: %v", err)
 	}
+	endpoint = svc.Spec.ClusterIP
 
 	if len(endpoint) == 0 {
 		return fmt.Errorf("failed to get endpoint for portworx volume driver")
@@ -565,8 +565,8 @@ func (p *portworx) OwnsPVC(pvc *v1.PersistentVolumeClaim) bool {
 	} else {
 		storageClassName := k8shelper.GetPersistentVolumeClaimClass(pvc)
 		if storageClassName != "" {
-			storageClass, err := k8s.Instance().GetStorageClass(storageClassName)
-			if err == nil {
+			storageClass, err := k8s.GetStorageClass(storageClassName)
+			if err != nil {
 				provisioner = storageClass.Provisioner
 			} else {
 				logrus.Warnf("Error getting storageclass %v for pvc %v: %v", storageClassName, pvc.Name, err)
@@ -576,7 +576,7 @@ func (p *portworx) OwnsPVC(pvc *v1.PersistentVolumeClaim) bool {
 
 	if provisioner == "" {
 		// Try to get info from the PV since storage class could be deleted
-		pv, err := k8s.Instance().GetPersistentVolume(pvc.Spec.VolumeName)
+		pv, err := k8s.GetPersistentVolume(pvc.Spec.VolumeName)
 		if err != nil {
 			logrus.Warnf("Error getting pv %v for pvc %v: %v", pvc.Spec.VolumeName, pvc.Name, err)
 			return false
@@ -606,9 +606,7 @@ func (p *portworx) GetPodVolumes(podSpec *v1.PodSpec, namespace string) ([]*stor
 	for _, volume := range podSpec.Volumes {
 		volumeName := ""
 		if volume.PersistentVolumeClaim != nil {
-			pvc, err := k8s.Instance().GetPersistentVolumeClaim(
-				volume.PersistentVolumeClaim.ClaimName,
-				namespace)
+			pvc, err := k8s.GetPersistentVolumeClaim(volume.PersistentVolumeClaim.ClaimName, namespace)
 			if err != nil {
 				return nil, err
 			}
@@ -978,7 +976,7 @@ func (p *portworx) SnapshotDelete(snapDataSrc *crdv1.VolumeSnapshotDataSource, _
 			if len(snapDataNames) > 0 {
 				var lastError error
 				for _, snapDataName := range snapDataNames {
-					snapData, err := k8s.Instance().GetSnapshotData(snapDataName)
+					snapData, err := k8s.GetSnapshotData(snapDataName)
 					if err != nil {
 						lastError = err
 						logrus.Errorf("Failed to get volume snapshot data: %s due to err: %v", snapDataName, err)
@@ -990,7 +988,7 @@ func (p *portworx) SnapshotDelete(snapDataSrc *crdv1.VolumeSnapshotDataSource, _
 
 					logrus.Infof("Deleting VolumeSnapshot:[%s] %s", snapNamespace, snapName)
 					err = wait.ExponentialBackoff(snapAPICallBackoff, func() (bool, error) {
-						err = k8s.Instance().DeleteSnapshot(snapName, snapNamespace)
+						err = k8s.DeleteSnapshot(snapName, snapNamespace)
 						if err != nil {
 							return false, nil
 						}
@@ -1291,15 +1289,15 @@ func (p *portworx) CompleteVolumeSnapshotRestore(snapRestore *stork_crd.VolumeSn
 }
 
 // getSnapshotDetails returns PX snapID, snapshotType, credID(if any)
-// error if unable to retrive snap data
+// error if unable to retrieve snap data
 func getSnapshotDetails(snapDataName string) (string, crdv1.PortworxSnapshotType, string, error) {
-	snapshotData, err := k8s.Instance().GetSnapshotData(snapDataName)
+	snapshotData, err := k8s.GetSnapshotData(snapDataName)
 	if err != nil {
 		return "", "", "", fmt.Errorf("failed to retrieve VolumeSnapshotData %s: %v",
 			snapDataName, err)
 	}
 	// Let's verify if source snapshotdata is complete
-	err = k8s.Instance().ValidateSnapshotData(snapshotData.Metadata.Name, false, validateSnapshotTimeout, validateSnapshotRetryInterval)
+	err = k8s.ValidateSnapshotData(snapshotData.Metadata.Name, false, validateSnapshotTimeout, validateSnapshotRetryInterval)
 	if err != nil {
 		return "", "", "", fmt.Errorf("snapshot: %s is not complete. %v", snapshotData.Metadata.Name, err)
 	}
@@ -1421,7 +1419,7 @@ func (p *portworx) SnapshotRestore(
 	}
 
 	// Let's verify if source snapshotdata is complete
-	err = k8s.Instance().ValidateSnapshotData(snapshotData.Metadata.Name, false, validateSnapshotTimeout, validateSnapshotRetryInterval)
+	err = k8s.ValidateSnapshotData(snapshotData.Metadata.Name, false, validateSnapshotTimeout, validateSnapshotRetryInterval)
 	if err != nil {
 		return nil, nil, fmt.Errorf("snapshot: %s is not complete. %v", snapshotName, err)
 	}
@@ -1438,7 +1436,7 @@ func (p *portworx) SnapshotRestore(
 		}
 
 		// Check if this is a group snapshot
-		snap, err := k8s.Instance().GetSnapshot(snapshotName, snapshotNamespace)
+		snap, err := k8s.GetSnapshot(snapshotName, snapshotNamespace)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1776,7 +1774,7 @@ func (p *portworx) getPVCsForSnapshot(snap *crdv1.VolumeSnapshot) ([]v1.Persiste
 
 	switch snapType {
 	case crdv1.PortworxSnapshotTypeCloud:
-		pvc, err := k8s.Instance().GetPersistentVolumeClaim(snap.Spec.PersistentVolumeClaimName, snap.Metadata.Namespace)
+		pvc, err := k8s.GetPersistentVolumeClaim(snap.Spec.PersistentVolumeClaimName, snap.Metadata.Namespace)
 		if err != nil {
 			return nil, err
 		}
@@ -1791,7 +1789,7 @@ func (p *portworx) getPVCsForSnapshot(snap *crdv1.VolumeSnapshot) ([]v1.Persiste
 		}
 
 		// local single snapshot
-		pvc, err := k8s.Instance().GetPersistentVolumeClaim(snap.Spec.PersistentVolumeClaimName, snap.Metadata.Namespace)
+		pvc, err := k8s.GetPersistentVolumeClaim(snap.Spec.PersistentVolumeClaimName, snap.Metadata.Namespace)
 		if err != nil {
 			return nil, err
 		}
@@ -1957,13 +1955,13 @@ func (p *portworx) StartMigration(migration *stork_crd.Migration) ([]*stork_crd.
 		return nil, fmt.Errorf("namespaces for migration cannot be empty")
 	}
 
-	clusterPair, err := k8s.Instance().GetClusterPair(migration.Spec.ClusterPair, migration.Namespace)
+	clusterPair, err := k8s.GetClusterPair(migration.Spec.ClusterPair, migration.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("error getting clusterpair: %v", err)
 	}
 	volumeInfos := make([]*stork_crd.MigrationVolumeInfo, 0)
 	for _, namespace := range migration.Spec.Namespaces {
-		pvcList, err := k8s.Instance().GetPersistentVolumeClaims(namespace, migration.Spec.Selectors)
+		pvcList, err := k8s.ListPersistentVolumeClaims(namespace, migration.Spec.Selectors)
 		if err != nil {
 			return nil, fmt.Errorf("error getting list of volumes to migrate: %v", err)
 		}
@@ -1977,10 +1975,8 @@ func (p *portworx) StartMigration(migration *stork_crd.Migration) ([]*stork_crd.
 			}
 			volumeInfos = append(volumeInfos, volumeInfo)
 
-			volume, err := k8s.Instance().GetVolumeForPersistentVolumeClaim(&pvc)
-			if err != nil {
-				return nil, fmt.Errorf("error getting volume for PVC: %v", err)
-			}
+			volume := pvc.Spec.VolumeName
+
 			volumeInfo.Volume = volume
 			taskID := p.getMigrationTaskID(migration, volumeInfo)
 			_, err = volDriver.CloudMigrateStart(&api.CloudMigrateStartRequest{
@@ -2024,7 +2020,7 @@ func (p *portworx) GetMigrationStatus(migration *stork_crd.Migration) ([]*stork_
 		return nil, err
 	}
 
-	clusterPair, err := k8s.Instance().GetClusterPair(migration.Spec.ClusterPair, migration.Namespace)
+	clusterPair, err := k8s.GetClusterPair(migration.Spec.ClusterPair, migration.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("error getting clusterpair: %v", err)
 	}
@@ -2184,7 +2180,7 @@ func (p *portworx) DeleteGroupSnapshot(snap *stork_crd.GroupVolumeSnapshot) erro
 			continue
 		}
 
-		err := k8s.Instance().DeleteSnapshot(vs.VolumeSnapshotName, snap.Namespace)
+		err := k8s.DeleteSnapshot(vs.VolumeSnapshotName, snap.Namespace)
 		if err != nil {
 			if !k8s_errors.IsNotFound(err) {
 				log.GroupSnapshotLog(snap).Errorf("failed to delete snapshot due to: %v", err)
@@ -2471,7 +2467,7 @@ func (p *portworx) StartBackup(backup *stork_crd.ApplicationBackup) ([]*stork_cr
 	}
 	volumeInfos := make([]*stork_crd.ApplicationBackupVolumeInfo, 0)
 	for _, namespace := range backup.Spec.Namespaces {
-		pvcList, err := k8s.Instance().GetPersistentVolumeClaims(namespace, backup.Spec.Selectors)
+		pvcList, err := k8s.ListPersistentVolumeClaims(namespace, backup.Spec.Selectors)
 		if err != nil {
 			return nil, fmt.Errorf("error getting list of volumes to migrate: %v", err)
 		}
@@ -2488,10 +2484,8 @@ func (p *portworx) StartBackup(backup *stork_crd.ApplicationBackup) ([]*stork_cr
 			volumeInfo.Namespace = pvc.Namespace
 			volumeInfos = append(volumeInfos, volumeInfo)
 
-			volume, err := k8s.Instance().GetVolumeForPersistentVolumeClaim(&pvc)
-			if err != nil {
-				return nil, fmt.Errorf("Error getting volume for PVC: %v", err)
-			}
+			volume := pvc.Spec.VolumeName
+
 			volumeInfo.Volume = volume
 			taskID := p.getBackupRestoreTaskID(backup.UID, volumeInfo.Namespace, volumeInfo.PersistentVolumeClaim)
 			credID := p.getCredID(backup.Spec.BackupLocation, backup.Namespace)
@@ -2609,7 +2603,7 @@ func (p *portworx) StartRestore(restore *stork_crd.ApplicationRestore) ([]*stork
 	if err != nil {
 		return nil, err
 	}
-	backup, err := k8s.Instance().GetApplicationBackup(restore.Spec.BackupName, restore.Namespace)
+	backup, err := k8s.GetApplicationBackup(restore.Spec.BackupName, restore.Namespace)
 	if err != nil {
 		return nil, err
 	}
