@@ -9,7 +9,7 @@ import (
 	stork_api "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
 	"github.com/libopenstorage/stork/pkg/applicationmanager/controllers"
 	"github.com/libopenstorage/stork/pkg/resourcecollector"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/apiextensions"
 	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/tools/record"
@@ -33,7 +33,7 @@ func (a *ApplicationManager) Init(mgr manager.Manager, adminNamespace string, st
 	if err := a.createCRD(); err != nil {
 		return err
 	}
-	backupController := controllers.NewApplicationBackup(mgr, a.Driver, a.Recorder, a.ResourceCollector)
+	backupController := controllers.NewApplicationBackup(mgr, a.Recorder, a.ResourceCollector)
 	if err := backupController.Init(mgr, adminNamespace); err != nil {
 		return err
 	}
@@ -64,18 +64,18 @@ func (a *ApplicationManager) Init(mgr manager.Manager, adminNamespace string, st
 }
 
 func (a *ApplicationManager) createCRD() error {
-	resource := k8s.CustomResource{
+	resource := apiextensions.CustomResource{
 		Name:    stork_api.BackupLocationResourceName,
 		Plural:  stork_api.BackupLocationResourcePlural,
-		Group:   stork_api.SchemeGroupVersion.Version,
+		Group:   stork_api.SchemeGroupVersion.Group,
 		Version: stork_api.SchemeGroupVersion.Version,
 		Scope:   apiextensionsv1beta1.NamespaceScoped,
 		Kind:    reflect.TypeOf(stork_api.BackupLocation{}).Name(),
 	}
-	err := k8s.Instance().CreateCRD(resource)
+	err := apiextensions.Instance().CreateCRD(resource)
 	if err != nil && !errors.IsAlreadyExists(err) {
 		return err
 	}
 
-	return k8s.Instance().ValidateCRD(resource, validateCRDTimeout, validateCRDInterval)
+	return apiextensions.Instance().ValidateCRD(resource, validateCRDTimeout, validateCRDInterval)
 }

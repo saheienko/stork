@@ -8,30 +8,47 @@ import (
 	"reflect"
 
 	"github.com/libopenstorage/stork/drivers/volume"
-	"github.com/libopenstorage/stork/pkg/apis/stork"
 	storkapi "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/libopenstorage/stork/pkg/controller"
 	"github.com/libopenstorage/stork/pkg/crypto"
 	"github.com/libopenstorage/stork/pkg/log"
 	"github.com/libopenstorage/stork/pkg/objectstore"
 	"github.com/libopenstorage/stork/pkg/resourcecollector"
-	"github.com/operator-framework/operator-sdk/pkg/sdk"
 	"github.com/portworx/sched-ops/k8s"
-	"k8s.io/api/core/v1"
+	"github.com/portworx/sched-ops/k8s/apiextensions"
+	"github.com/sirupsen/logrus"
+	v1 "k8s.io/api/core/v1"
 	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
+	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 )
+
+// NewApplicationRestore creates a new instance of ApplicationRestoreController.
+func NewApplicationRestore(mgr manager.Manager, d volume.Driver, r record.EventRecorder, rc resourcecollector.ResourceCollector) *ApplicationRestoreController {
+	return &ApplicationRestoreController{
+		client:            mgr.GetClient(),
+		scheme:            mgr.GetScheme(),
+		Recorder:          r,
+		ResourceCollector: rc,
+	}
+}
 
 // ApplicationRestoreController reconciles applicationrestore objects
 type ApplicationRestoreController struct {
+	client runtimeclient.Client
+	scheme *runtime.Scheme
+
 	Recorder              record.EventRecorder
 	ResourceCollector     resourcecollector.ResourceCollector
 	dynamicInterface      dynamic.Interface
@@ -39,7 +56,7 @@ type ApplicationRestoreController struct {
 }
 
 // Init Initialize the application restore controller
-func (a *ApplicationRestoreController) Init(restoreAdminNamespace string) error {
+func (a *ApplicationRestoreController) Init(mgr manager.Manager, restoreAdminNamespace string) error {
 	err := a.createCRD()
 	if err != nil {
 		return err
@@ -57,15 +74,14 @@ func (a *ApplicationRestoreController) Init(restoreAdminNamespace string) error 
 		return err
 	}
 
-	return controller.Register(
-		&schema.GroupVersionKind{
-			Group:   stork.GroupName,
-			Version: storkapi.SchemeGroupVersion.Version,
-			Kind:    reflect.TypeOf(storkapi.ApplicationRestore{}).Name(),
-		},
-		"",
-		resyncPeriod,
-		a)
+	// Create a new controller
+	c, err := controller.New("application-restore-controller", mgr, controller.Options{Reconciler: a})
+	if err != nil {
+		return err
+	}
+
+	// Watch for changes to primary resource Migration
+	return c.Watch(&source.Kind{Type: &storkapi.ApplicationRestore{}}, &handler.EnqueueRequestForObject{})
 }
 
 func (a *ApplicationRestoreController) setDefaults(restore *storkapi.ApplicationRestore) error {
@@ -110,78 +126,97 @@ func (a *ApplicationRestoreController) verifyNamespaces(restore *storkapi.Applic
 	return nil
 }
 
-// Handle updates for ApplicationRestore objects
-func (a *ApplicationRestoreController) Handle(ctx context.Context, event sdk.Event) error {
-	switch o := event.Object.(type) {
-	case *storkapi.ApplicationRestore:
-		restore := o
-		if event.Deleted {
-			drivers := a.getDriversForRestore(restore)
+// Reconcile updates for ApplicationRestore objects.
+func (a *ApplicationRestoreController) Reconcile(request reconcile.Request) (reconcile.Result, error) {
+	logrus.Printf("Reconciling ApplicationRestore %s/%s", request.Namespace, request.Name)
 
-			for driverName := range drivers {
-				driver, err := volume.Get(driverName)
-				if err != nil {
-					return err
-				}
-				return driver.CancelRestore(restore)
-			}
-			return nil
+	// Fetch the ApplicationBackup instance
+	restore := &storkapi.ApplicationRestore{}
+	err := a.client.Get(context.TODO(), request.NamespacedName, restore)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Request object not found, could have been deleted after reconcile request.
+			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
+			// Return and don't requeue
+			return reconcile.Result{}, nil
 		}
-
-		err := a.setDefaults(restore)
-		if err != nil {
-			log.ApplicationRestoreLog(restore).Errorf(err.Error())
-			a.Recorder.Event(restore,
-				v1.EventTypeWarning,
-				string(storkapi.ApplicationRestoreStatusFailed),
-				err.Error())
-			return nil
-		}
-
-		err = a.verifyNamespaces(restore)
-		if err != nil {
-			log.ApplicationRestoreLog(restore).Errorf(err.Error())
-			a.Recorder.Event(restore,
-				v1.EventTypeWarning,
-				string(storkapi.ApplicationRestoreStatusFailed),
-				err.Error())
-			return nil
-		}
-
-		switch restore.Status.Stage {
-		case storkapi.ApplicationRestoreStageInitial:
-			// Make sure the namespaces exist
-			fallthrough
-		case storkapi.ApplicationRestoreStageVolumes:
-			err := a.restoreVolumes(restore)
-			if err != nil {
-				message := fmt.Sprintf("Error restoring volumes: %v", err)
-				log.ApplicationRestoreLog(restore).Errorf(message)
-				a.Recorder.Event(restore,
-					v1.EventTypeWarning,
-					string(storkapi.ApplicationRestoreStatusFailed),
-					message)
-				return nil
-			}
-		case storkapi.ApplicationRestoreStageApplications:
-			err := a.restoreResources(restore)
-			if err != nil {
-				message := fmt.Sprintf("Error restoring resources: %v", err)
-				log.ApplicationRestoreLog(restore).Errorf(message)
-				a.Recorder.Event(restore,
-					v1.EventTypeWarning,
-					string(storkapi.ApplicationRestoreStatusFailed),
-					message)
-				return nil
-			}
-
-		case storkapi.ApplicationRestoreStageFinal:
-			// Do Nothing
-			return nil
-		default:
-			log.ApplicationRestoreLog(restore).Errorf("Invalid stage for restore: %v", restore.Status.Stage)
-		}
+		// Error reading the object - requeue the request.
+		return reconcile.Result{}, err
 	}
+
+	return reconcile.Result{}, a.handle(context.TODO(), restore)
+}
+
+// Handle updates for ApplicationRestore objects
+func (a *ApplicationRestoreController) handle(ctx context.Context, restore *storkapi.ApplicationRestore) error {
+	// TODO: use finalizers
+	if restore.DeletionTimestamp != nil {
+		drivers := a.getDriversForRestore(restore)
+
+		for driverName := range drivers {
+			driver, err := volume.Get(driverName)
+			if err != nil {
+				return err
+			}
+			return driver.CancelRestore(restore)
+		}
+		return nil
+	}
+
+	err := a.setDefaults(restore)
+	if err != nil {
+		log.ApplicationRestoreLog(restore).Errorf(err.Error())
+		a.Recorder.Event(restore,
+			v1.EventTypeWarning,
+			string(storkapi.ApplicationRestoreStatusFailed),
+			err.Error())
+		return nil
+	}
+
+	err = a.verifyNamespaces(restore)
+	if err != nil {
+		log.ApplicationRestoreLog(restore).Errorf(err.Error())
+		a.Recorder.Event(restore,
+			v1.EventTypeWarning,
+			string(storkapi.ApplicationRestoreStatusFailed),
+			err.Error())
+		return nil
+	}
+
+	switch restore.Status.Stage {
+	case storkapi.ApplicationRestoreStageInitial:
+		// Make sure the namespaces exist
+		fallthrough
+	case storkapi.ApplicationRestoreStageVolumes:
+		err := a.restoreVolumes(restore)
+		if err != nil {
+			message := fmt.Sprintf("Error restoring volumes: %v", err)
+			log.ApplicationRestoreLog(restore).Errorf(message)
+			a.Recorder.Event(restore,
+				v1.EventTypeWarning,
+				string(storkapi.ApplicationRestoreStatusFailed),
+				message)
+			return nil
+		}
+	case storkapi.ApplicationRestoreStageApplications:
+		err := a.restoreResources(restore)
+		if err != nil {
+			message := fmt.Sprintf("Error restoring resources: %v", err)
+			log.ApplicationRestoreLog(restore).Errorf(message)
+			a.Recorder.Event(restore,
+				v1.EventTypeWarning,
+				string(storkapi.ApplicationRestoreStatusFailed),
+				message)
+			return nil
+		}
+
+	case storkapi.ApplicationRestoreStageFinal:
+		// Do Nothing
+		return nil
+	default:
+		log.ApplicationRestoreLog(restore).Errorf("Invalid stage for restore: %v", restore.Status.Stage)
+	}
+
 	return nil
 }
 
@@ -250,7 +285,7 @@ func (a *ApplicationRestoreController) restoreVolumes(restore *storkapi.Applicat
 			restore.Status.Volumes = append(restore.Status.Volumes, restoreVolumeInfos...)
 		}
 		restore.Status.Status = storkapi.ApplicationRestoreStatusInProgress
-		err = sdk.Update(restore)
+		err = a.client.Update(context.TODO(), restore)
 		if err != nil {
 			return err
 		}
@@ -278,7 +313,7 @@ func (a *ApplicationRestoreController) restoreVolumes(restore *storkapi.Applicat
 
 		restore.Status.Volumes = volumeInfos
 		// Store the new status
-		err = sdk.Update(restore)
+		err = a.client.Update(context.TODO(), restore)
 		if err != nil {
 			return err
 		}
@@ -318,7 +353,7 @@ func (a *ApplicationRestoreController) restoreVolumes(restore *storkapi.Applicat
 		restore.Status.Stage = storkapi.ApplicationRestoreStageApplications
 		restore.Status.Status = storkapi.ApplicationRestoreStatusInProgress
 		// Update the current state and then move on to restoring resources
-		err := sdk.Update(restore)
+		err := a.client.Update(context.TODO(), restore)
 		if err != nil {
 			return err
 		}
@@ -329,7 +364,7 @@ func (a *ApplicationRestoreController) restoreVolumes(restore *storkapi.Applicat
 		}
 	}
 
-	err := sdk.Update(restore)
+	err := a.client.Update(context.TODO(), restore)
 	if err != nil {
 		return err
 	}
@@ -569,7 +604,7 @@ func (a *ApplicationRestoreController) restoreResources(
 		}
 	}
 
-	if err := sdk.Update(restore); err != nil {
+	if err := a.client.Update(context.TODO(), restore); err != nil {
 		return err
 	}
 
@@ -577,10 +612,10 @@ func (a *ApplicationRestoreController) restoreResources(
 }
 
 func (a *ApplicationRestoreController) createCRD() error {
-	resource := k8s.CustomResource{
+	resource := apiextensions.CustomResource{
 		Name:    storkapi.ApplicationRestoreResourceName,
 		Plural:  storkapi.ApplicationRestoreResourcePlural,
-		Group:   stork.GroupName,
+		Group:   storkapi.SchemeGroupVersion.Group,
 		Version: storkapi.SchemeGroupVersion.Version,
 		Scope:   apiextensionsv1beta1.NamespaceScoped,
 		Kind:    reflect.TypeOf(storkapi.ApplicationRestore{}).Name(),

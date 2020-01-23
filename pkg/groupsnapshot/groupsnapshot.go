@@ -6,7 +6,7 @@ import (
 	"github.com/libopenstorage/stork/drivers/volume"
 	"github.com/libopenstorage/stork/pkg/groupsnapshot/controllers"
 	"github.com/libopenstorage/stork/pkg/rule"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/record"
@@ -15,9 +15,8 @@ import (
 
 // GroupSnapshot instance
 type GroupSnapshot struct {
-	Driver                  volume.Driver
-	Recorder                record.EventRecorder
-	groupSnapshotController *controllers.GroupSnapshotController
+	Driver   volume.Driver
+	Recorder record.EventRecorder
 }
 
 // Init init
@@ -36,7 +35,7 @@ func (m *GroupSnapshot) Init(mgr manager.Manager) error {
 }
 
 func (m *GroupSnapshot) performRuleRecovery() error {
-	allGroupSnaps, err := k8s.Instance().ListGroupSnapshots(corev1.NamespaceAll)
+	allGroupSnaps, err := stork.Instance().ListGroupSnapshots(corev1.NamespaceAll)
 	if err != nil {
 		logrus.Errorf("Failed to list all group snapshots due to: %v. Will retry.", err)
 		return err

@@ -25,14 +25,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/glog"
 	"google.golang.org/grpc"
+	"k8s.io/klog"
 
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
 	v1helper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
 	pluginapi "k8s.io/kubernetes/pkg/kubelet/apis/deviceplugin/v1beta1"
+	podresourcesapi "k8s.io/kubernetes/pkg/kubelet/apis/podresources/v1alpha1"
 	"k8s.io/kubernetes/pkg/kubelet/checkpointmanager"
 	"k8s.io/kubernetes/pkg/kubelet/checkpointmanager/errors"
 	"k8s.io/kubernetes/pkg/kubelet/cm/devicemanager/checkpoint"
@@ -105,7 +106,7 @@ func NewManagerImpl() (*ManagerImpl, error) {
 }
 
 func newManagerImpl(socketPath string) (*ManagerImpl, error) {
-	glog.V(2).Infof("Creating Device Plugin manager at %s", socketPath)
+	klog.V(2).Infof("Creating Device Plugin manager at %s", socketPath)
 
 	if socketPath == "" || !filepath.IsAbs(socketPath) {
 		return nil, fmt.Errorf(errBadSocket+" %s", socketPath)
@@ -169,7 +170,7 @@ func (m *ManagerImpl) removeContents(dir string) error {
 		}
 		stat, err := os.Stat(filePath)
 		if err != nil {
-			glog.Errorf("Failed to stat file %s: %v", filePath, err)
+			klog.Errorf("Failed to stat file %s: %v", filePath, err)
 			continue
 		}
 		if stat.IsDir() {
@@ -192,7 +193,7 @@ func (m *ManagerImpl) checkpointFile() string {
 // podDevices and allocatedDevices information from checkpoint-ed state and
 // starts device plugin registration service.
 func (m *ManagerImpl) Start(activePods ActivePodsFunc, sourcesReady config.SourcesReady) error {
-	glog.V(2).Infof("Starting Device Plugin manager")
+	klog.V(2).Infof("Starting Device Plugin manager")
 
 	m.activePods = activePods
 	m.sourcesReady = sourcesReady
@@ -200,7 +201,7 @@ func (m *ManagerImpl) Start(activePods ActivePodsFunc, sourcesReady config.Sourc
 	// Loads in allocatedDevices information from disk.
 	err := m.readCheckpoint()
 	if err != nil {
-		glog.Warningf("Continue after failing to read checkpoint file. Device allocation info may NOT be up-to-date. Err: %v", err)
+		klog.Warningf("Continue after failing to read checkpoint file. Device allocation info may NOT be up-to-date. Err: %v", err)
 	}
 
 	socketPath := filepath.Join(m.socketdir, m.socketname)
@@ -209,12 +210,12 @@ func (m *ManagerImpl) Start(activePods ActivePodsFunc, sourcesReady config.Sourc
 	// Removes all stale sockets in m.socketdir. Device plugins can monitor
 	// this and use it as a signal to re-register with the new Kubelet.
 	if err := m.removeContents(m.socketdir); err != nil {
-		glog.Errorf("Fail to clean up stale contents under %s: %v", m.socketdir, err)
+		klog.Errorf("Fail to clean up stale contents under %s: %v", m.socketdir, err)
 	}
 
 	s, err := net.Listen("unix", socketPath)
 	if err != nil {
-		glog.Errorf(errListenSocket+" %v", err)
+		klog.Errorf(errListenSocket+" %v", err)
 		return err
 	}
 
@@ -227,7 +228,7 @@ func (m *ManagerImpl) Start(activePods ActivePodsFunc, sourcesReady config.Sourc
 		m.server.Serve(s)
 	}()
 
-	glog.V(2).Infof("Serving device plugin registration server on %q", socketPath)
+	klog.V(2).Infof("Serving device plugin registration server on %q", socketPath)
 
 	return nil
 }
@@ -235,18 +236,18 @@ func (m *ManagerImpl) Start(activePods ActivePodsFunc, sourcesReady config.Sourc
 // GetWatcherHandler returns the plugin handler
 func (m *ManagerImpl) GetWatcherHandler() watcher.PluginHandler {
 	if f, err := os.Create(m.socketdir + "DEPRECATION"); err != nil {
-		glog.Errorf("Failed to create deprecation file at %s", m.socketdir)
+		klog.Errorf("Failed to create deprecation file at %s", m.socketdir)
 	} else {
 		f.Close()
-		glog.V(4).Infof("created deprecation file %s", f.Name())
+		klog.V(4).Infof("created deprecation file %s", f.Name())
 	}
 
 	return watcher.PluginHandler(m)
 }
 
 // ValidatePlugin validates a plugin if the version is correct and the name has the format of an extended resource
-func (m *ManagerImpl) ValidatePlugin(pluginName string, endpoint string, versions []string) error {
-	glog.V(2).Infof("Got Plugin %s at endpoint %s with versions %v", pluginName, endpoint, versions)
+func (m *ManagerImpl) ValidatePlugin(pluginName string, endpoint string, versions []string, foundInDeprecatedDir bool) error {
+	klog.V(2).Infof("Got Plugin %s at endpoint %s with versions %v", pluginName, endpoint, versions)
 
 	if !m.isVersionCompatibleWithPlugin(versions) {
 		return fmt.Errorf("manager version, %s, is not among plugin supported versions %v", pluginapi.Version, versions)
@@ -262,8 +263,8 @@ func (m *ManagerImpl) ValidatePlugin(pluginName string, endpoint string, version
 // RegisterPlugin starts the endpoint and registers it
 // TODO: Start the endpoint and wait for the First ListAndWatch call
 //       before registering the plugin
-func (m *ManagerImpl) RegisterPlugin(pluginName string, endpoint string) error {
-	glog.V(2).Infof("Registering Plugin %s at endpoint %s", pluginName, endpoint)
+func (m *ManagerImpl) RegisterPlugin(pluginName string, endpoint string, versions []string) error {
+	klog.V(2).Infof("Registering Plugin %s at endpoint %s", pluginName, endpoint)
 
 	e, err := newEndpointImpl(endpoint, pluginName, m.callback)
 	if err != nil {
@@ -310,10 +311,7 @@ func (m *ManagerImpl) isVersionCompatibleWithPlugin(versions []string) bool {
 	return false
 }
 
-// Allocate is the call that you can use to allocate a set of devices
-// from the registered device plugins.
-func (m *ManagerImpl) Allocate(node *schedulercache.NodeInfo, attrs *lifecycle.PodAdmitAttributes) error {
-	pod := attrs.Pod
+func (m *ManagerImpl) allocatePodResources(pod *v1.Pod) error {
 	devicesToReuse := make(map[string]sets.String)
 	for _, container := range pod.Spec.InitContainers {
 		if err := m.allocateContainerResources(pod, &container, devicesToReuse); err != nil {
@@ -326,6 +324,18 @@ func (m *ManagerImpl) Allocate(node *schedulercache.NodeInfo, attrs *lifecycle.P
 			return err
 		}
 		m.podDevices.removeContainerAllocatedResources(string(pod.UID), container.Name, devicesToReuse)
+	}
+	return nil
+}
+
+// Allocate is the call that you can use to allocate a set of devices
+// from the registered device plugins.
+func (m *ManagerImpl) Allocate(node *schedulercache.NodeInfo, attrs *lifecycle.PodAdmitAttributes) error {
+	pod := attrs.Pod
+	err := m.allocatePodResources(pod)
+	if err != nil {
+		klog.Errorf("Failed to allocate device plugin resource for pod %s: %v", string(pod.UID), err)
+		return err
 	}
 
 	m.mutex.Lock()
@@ -342,7 +352,7 @@ func (m *ManagerImpl) Allocate(node *schedulercache.NodeInfo, attrs *lifecycle.P
 
 // Register registers a device plugin.
 func (m *ManagerImpl) Register(ctx context.Context, r *pluginapi.RegisterRequest) (*pluginapi.Empty, error) {
-	glog.Infof("Got registration request from device plugin with resource name %q", r.ResourceName)
+	klog.Infof("Got registration request from device plugin with resource name %q", r.ResourceName)
 	metrics.DevicePluginRegistrationCount.WithLabelValues(r.ResourceName).Inc()
 	var versionCompatible bool
 	for _, v := range pluginapi.SupportedVersions {
@@ -353,13 +363,13 @@ func (m *ManagerImpl) Register(ctx context.Context, r *pluginapi.RegisterRequest
 	}
 	if !versionCompatible {
 		errorString := fmt.Sprintf(errUnsupportedVersion, r.Version, pluginapi.SupportedVersions)
-		glog.Infof("Bad registration request from device plugin with resource name %q: %s", r.ResourceName, errorString)
+		klog.Infof("Bad registration request from device plugin with resource name %q: %s", r.ResourceName, errorString)
 		return &pluginapi.Empty{}, fmt.Errorf(errorString)
 	}
 
 	if !v1helper.IsExtendedResourceName(v1.ResourceName(r.ResourceName)) {
 		errorString := fmt.Sprintf(errInvalidResourceName, r.ResourceName)
-		glog.Infof("Bad registration request from device plugin: %s", errorString)
+		klog.Infof("Bad registration request from device plugin: %s", errorString)
 		return &pluginapi.Empty{}, fmt.Errorf(errorString)
 	}
 
@@ -396,7 +406,7 @@ func (m *ManagerImpl) registerEndpoint(resourceName string, options *pluginapi.D
 	defer m.mutex.Unlock()
 
 	m.endpoints[resourceName] = endpointInfo{e: e, opts: options}
-	glog.V(2).Infof("Registered endpoint %v", e)
+	klog.V(2).Infof("Registered endpoint %v", e)
 }
 
 func (m *ManagerImpl) runEndpoint(resourceName string, e endpoint) {
@@ -410,13 +420,13 @@ func (m *ManagerImpl) runEndpoint(resourceName string, e endpoint) {
 		m.markResourceUnhealthy(resourceName)
 	}
 
-	glog.V(2).Infof("Endpoint (%s, %v) became unhealthy", resourceName, e)
+	klog.V(2).Infof("Endpoint (%s, %v) became unhealthy", resourceName, e)
 }
 
 func (m *ManagerImpl) addEndpoint(r *pluginapi.RegisterRequest) {
 	new, err := newEndpointImpl(filepath.Join(m.socketdir, r.Endpoint), r.ResourceName, m.callback)
 	if err != nil {
-		glog.Errorf("Failed to dial device plugin with request %v: %v", r, err)
+		klog.Errorf("Failed to dial device plugin with request %v: %v", r, err)
 		return
 	}
 	m.registerEndpoint(r.ResourceName, r.Options, new)
@@ -426,7 +436,7 @@ func (m *ManagerImpl) addEndpoint(r *pluginapi.RegisterRequest) {
 }
 
 func (m *ManagerImpl) markResourceUnhealthy(resourceName string) {
-	glog.V(2).Infof("Mark all resources Unhealthy for resource %s", resourceName)
+	klog.V(2).Infof("Mark all resources Unhealthy for resource %s", resourceName)
 	healthyDevices := sets.NewString()
 	if _, ok := m.healthyDevices[resourceName]; ok {
 		healthyDevices = m.healthyDevices[resourceName]
@@ -463,7 +473,7 @@ func (m *ManagerImpl) GetCapacity() (v1.ResourceList, v1.ResourceList, []string)
 			// should always be consistent. Otherwise, we run with the risk
 			// of failing to garbage collect non-existing resources or devices.
 			if !ok {
-				glog.Errorf("unexpected: healthyDevices and endpoints are out of sync")
+				klog.Errorf("unexpected: healthyDevices and endpoints are out of sync")
 			}
 			delete(m.endpoints, resourceName)
 			delete(m.healthyDevices, resourceName)
@@ -478,7 +488,7 @@ func (m *ManagerImpl) GetCapacity() (v1.ResourceList, v1.ResourceList, []string)
 		eI, ok := m.endpoints[resourceName]
 		if (ok && eI.e.stopGracePeriodExpired()) || !ok {
 			if !ok {
-				glog.Errorf("unexpected: unhealthyDevices and endpoints are out of sync")
+				klog.Errorf("unexpected: unhealthyDevices and endpoints are out of sync")
 			}
 			delete(m.endpoints, resourceName)
 			delete(m.unhealthyDevices, resourceName)
@@ -524,7 +534,7 @@ func (m *ManagerImpl) readCheckpoint() error {
 	err := m.checkpointManager.GetCheckpoint(kubeletDeviceManagerCheckpoint, cp)
 	if err != nil {
 		if err == errors.ErrCheckpointNotFound {
-			glog.Warningf("Failed to retrieve checkpoint for %q: %v", kubeletDeviceManagerCheckpoint, err)
+			klog.Warningf("Failed to retrieve checkpoint for %q: %v", kubeletDeviceManagerCheckpoint, err)
 			return nil
 		}
 		return err
@@ -561,7 +571,7 @@ func (m *ManagerImpl) updateAllocatedDevices(activePods []*v1.Pod) {
 	if len(podsToBeRemoved) <= 0 {
 		return
 	}
-	glog.V(3).Infof("pods to be removed: %v", podsToBeRemoved.List())
+	klog.V(3).Infof("pods to be removed: %v", podsToBeRemoved.List())
 	m.podDevices.delete(podsToBeRemoved.List())
 	// Regenerated allocatedDevices after we update pod allocation information.
 	m.allocatedDevices = m.podDevices.devices()
@@ -577,7 +587,7 @@ func (m *ManagerImpl) devicesToAllocate(podUID, contName, resource string, requi
 	// This can happen if a container restarts for example.
 	devices := m.podDevices.containerDevices(podUID, contName, resource)
 	if devices != nil {
-		glog.V(3).Infof("Found pre-allocated devices for resource %s container %q in Pod %q: %v", resource, contName, podUID, devices.List())
+		klog.V(3).Infof("Found pre-allocated devices for resource %s container %q in Pod %q: %v", resource, contName, podUID, devices.List())
 		needed = needed - devices.Len()
 		// A pod's resource is not expected to change once admitted by the API server,
 		// so just fail loudly here. We can revisit this part if this no longer holds.
@@ -589,7 +599,7 @@ func (m *ManagerImpl) devicesToAllocate(podUID, contName, resource string, requi
 		// No change, no work.
 		return nil, nil
 	}
-	glog.V(3).Infof("Needs to allocate %d %q for pod %q container %q", needed, resource, podUID, contName)
+	klog.V(3).Infof("Needs to allocate %d %q for pod %q container %q", needed, resource, podUID, contName)
 	// Needs to allocate additional devices.
 	if _, ok := m.healthyDevices[resource]; !ok {
 		return nil, fmt.Errorf("can't allocate unregistered device %s", resource)
@@ -640,7 +650,7 @@ func (m *ManagerImpl) allocateContainerResources(pod *v1.Pod, container *v1.Cont
 	for k, v := range container.Resources.Limits {
 		resource := string(k)
 		needed := int(v.Value())
-		glog.V(3).Infof("needs %d %s", needed, resource)
+		klog.V(3).Infof("needs %d %s", needed, resource)
 		if !m.isDevicePluginResource(resource) {
 			continue
 		}
@@ -684,7 +694,7 @@ func (m *ManagerImpl) allocateContainerResources(pod *v1.Pod, container *v1.Cont
 		devs := allocDevices.UnsortedList()
 		// TODO: refactor this part of code to just append a ContainerAllocationRequest
 		// in a passed in AllocateRequest pointer, and issues a single Allocate call per pod.
-		glog.V(3).Infof("Making allocation request for devices %v for device plugin %s", devs, resource)
+		klog.V(3).Infof("Making allocation request for devices %v for device plugin %s", devs, resource)
 		resp, err := eI.e.allocate(devs)
 		metrics.DevicePluginAllocationLatency.WithLabelValues(resource).Observe(metrics.SinceInMicroseconds(startRPCTime))
 		if err != nil {
@@ -716,6 +726,7 @@ func (m *ManagerImpl) allocateContainerResources(pod *v1.Pod, container *v1.Cont
 func (m *ManagerImpl) GetDeviceRunContainerOptions(pod *v1.Pod, container *v1.Container) (*DeviceRunContainerOptions, error) {
 	podUID := string(pod.UID)
 	contName := container.Name
+	needsReAllocate := false
 	for k := range container.Resources.Limits {
 		resource := string(k)
 		if !m.isDevicePluginResource(resource) {
@@ -725,6 +736,16 @@ func (m *ManagerImpl) GetDeviceRunContainerOptions(pod *v1.Pod, container *v1.Co
 		if err != nil {
 			return nil, err
 		}
+		// This is a device plugin resource yet we don't have cached
+		// resource state. This is likely due to a race during node
+		// restart. We re-issue allocate request to cover this race.
+		if m.podDevices.containerDevices(podUID, contName, resource) == nil {
+			needsReAllocate = true
+		}
+	}
+	if needsReAllocate {
+		klog.V(2).Infof("needs re-allocate device plugin resources for pod %s", podUID)
+		m.allocatePodResources(pod)
 	}
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
@@ -743,7 +764,7 @@ func (m *ManagerImpl) callPreStartContainerIfNeeded(podUID, contName, resource s
 
 	if eI.opts == nil || !eI.opts.PreStartRequired {
 		m.mutex.Unlock()
-		glog.V(4).Infof("Plugin options indicate to skip PreStartContainer for resource: %s", resource)
+		klog.V(4).Infof("Plugin options indicate to skip PreStartContainer for resource: %s", resource)
 		return nil
 	}
 
@@ -755,7 +776,7 @@ func (m *ManagerImpl) callPreStartContainerIfNeeded(podUID, contName, resource s
 
 	m.mutex.Unlock()
 	devs := devices.UnsortedList()
-	glog.V(4).Infof("Issuing an PreStartContainer call for container, %s, of pod %s", contName, podUID)
+	klog.V(4).Infof("Issuing an PreStartContainer call for container, %s, of pod %s", contName, podUID)
 	_, err := eI.e.preStartContainer(devs)
 	if err != nil {
 		return fmt.Errorf("device plugin PreStartContainer rpc failed with err: %v", err)
@@ -801,4 +822,11 @@ func (m *ManagerImpl) isDevicePluginResource(resource string) bool {
 		return true
 	}
 	return false
+}
+
+// GetDevices returns the devices used by the specified container
+func (m *ManagerImpl) GetDevices(podUID, containerName string) []*podresourcesapi.ContainerDevices {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	return m.podDevices.getContainerDevices(podUID, containerName)
 }

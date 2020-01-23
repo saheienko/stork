@@ -11,7 +11,8 @@ import (
 	stork_api "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
 	"github.com/libopenstorage/stork/pkg/log"
 	"github.com/libopenstorage/stork/pkg/schedule"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/apiextensions"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
@@ -33,6 +34,7 @@ const (
 	domainsMaxRetries           = 5
 )
 
+// NewMigrationSchedule creates a new instance of MigrationScheduleController.
 func NewMigrationSchedule(mgr manager.Manager, d volume.Driver, r record.EventRecorder) *MigrationScheduleController {
 	return &MigrationScheduleController{
 		client:   mgr.GetClient(),
@@ -68,6 +70,7 @@ func (m *MigrationScheduleController) Init(mgr manager.Manager) error {
 	return c.Watch(&source.Kind{Type: &stork_api.ApplicationBackup{}}, &handler.EnqueueRequestForObject{})
 }
 
+// Reconcile manages MigrationSchedule resources.
 func (m *MigrationScheduleController) Reconcile(request reconcile.Request) (reconcile.Result, error) {
 	logrus.Printf("Reconciling MigrationSchedule %s/%s", request.Namespace, request.Name)
 
@@ -185,7 +188,7 @@ func (m *MigrationScheduleController) updateMigrationStatus(migrationSchedule *s
 			// Get the updated status if we see it as not completed
 			if !m.isMigrationComplete(migration.Status) {
 				var updatedStatus stork_api.MigrationStatusType
-				pendingMigration, err := k8s.Instance().GetMigration(migration.Name, migrationSchedule.Namespace)
+				pendingMigration, err := stork.Instance().GetMigration(migration.Name, migrationSchedule.Namespace)
 				if err != nil {
 					m.Recorder.Event(migrationSchedule,
 						v1.EventTypeWarning,
@@ -328,7 +331,7 @@ func (m *MigrationScheduleController) startMigration(
 		Spec: migrationSchedule.Spec.Template.Spec,
 	}
 	log.MigrationScheduleLog(migrationSchedule).Infof("Starting migration %v", migrationName)
-	_, err = k8s.Instance().CreateMigration(migration)
+	_, err = stork.Instance().CreateMigration(migration)
 	return err
 }
 
@@ -348,7 +351,7 @@ func (m *MigrationScheduleController) pruneMigrations(migrationSchedule *stork_a
 				}
 			}
 			for i := 0; i < deleteBefore; i++ {
-				err := k8s.Instance().DeleteMigration(policyMigration[i].Name, migrationSchedule.Namespace)
+				err := stork.Instance().DeleteMigration(policyMigration[i].Name, migrationSchedule.Namespace)
 				if err != nil {
 					log.MigrationScheduleLog(migrationSchedule).Warnf("Error deleting %v: %v", policyMigration[i].Name, err)
 				}
@@ -370,7 +373,7 @@ func (m *MigrationScheduleController) deleteMigrations(migrationSchedule *stork_
 	var lastError error
 	for _, policyMigration := range migrationSchedule.Status.Items {
 		for _, migration := range policyMigration {
-			err := k8s.Instance().DeleteMigration(migration.Name, migrationSchedule.Namespace)
+			err := stork.Instance().DeleteMigration(migration.Name, migrationSchedule.Namespace)
 			if err != nil && !errors.IsNotFound(err) {
 				log.MigrationScheduleLog(migrationSchedule).Warnf("Error deleting %v: %v", migration.Name, err)
 				lastError = err
@@ -381,7 +384,7 @@ func (m *MigrationScheduleController) deleteMigrations(migrationSchedule *stork_
 }
 
 func (m *MigrationScheduleController) createCRD() error {
-	resource := k8s.CustomResource{
+	resource := apiextensions.CustomResource{
 		Name:    stork_api.MigrationScheduleResourceName,
 		Plural:  stork_api.MigrationScheduleResourcePlural,
 		Group:   stork_api.SchemeGroupVersion.Group,
@@ -389,10 +392,10 @@ func (m *MigrationScheduleController) createCRD() error {
 		Scope:   apiextensionsv1beta1.NamespaceScoped,
 		Kind:    reflect.TypeOf(stork_api.MigrationSchedule{}).Name(),
 	}
-	err := k8s.Instance().CreateCRD(resource)
+	err := apiextensions.Instance().CreateCRD(resource)
 	if err != nil && !errors.IsAlreadyExists(err) {
 		return err
 	}
 
-	return k8s.Instance().ValidateCRD(resource, validateCRDTimeout, validateCRDInterval)
+	return apiextensions.Instance().ValidateCRD(resource, validateCRDTimeout, validateCRDInterval)
 }

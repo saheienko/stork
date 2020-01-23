@@ -10,7 +10,10 @@ import (
 	"github.com/libopenstorage/stork/drivers/volume"
 	stork_api "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
 	"github.com/libopenstorage/stork/pkg/log"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/apiextensions"
+	"github.com/portworx/sched-ops/k8s/core"
+	"github.com/portworx/sched-ops/k8s/externalstorage"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
@@ -34,6 +37,7 @@ const (
 	validateSnapshotRetryTimeout = 5 * time.Second
 )
 
+// NewSnapshotRestoreController creates a new instance of SnapshotRestoreController.
 func NewSnapshotRestoreController(mgr manager.Manager, d volume.Driver, r record.EventRecorder) *SnapshotRestoreController {
 	return &SnapshotRestoreController{
 		client:   mgr.GetClient(),
@@ -69,6 +73,7 @@ func (c *SnapshotRestoreController) Init(mgr manager.Manager) error {
 	return ctrl.Watch(&source.Kind{Type: &stork_api.VolumeSnapshotRestore{}}, &handler.EnqueueRequestForObject{})
 }
 
+// Reconcile manages SnapShot resources.
 func (c *SnapshotRestoreController) Reconcile(request reconcile.Request) (reconcile.Result, error) {
 	logrus.Printf("Reconciling VolumeSnapshotRestore %s/%s", request.Namespace, request.Name)
 
@@ -168,19 +173,19 @@ func (c *SnapshotRestoreController) handleInitial(snapRestore *stork_api.VolumeS
 	log.VolumeSnapshotRestoreLog(snapRestore).Infof("Starting in place restore for snapshot %v", snapName)
 	if snapRestore.Spec.GroupSnapshot {
 		log.VolumeSnapshotRestoreLog(snapRestore).Infof("GroupVolumeSnapshot In-place restore request for %v", snapName)
-		snapshotList, err = k8s.Instance().GetSnapshotsForGroupSnapshot(snapName, snapNamespace)
+		snapshotList, err = stork.Instance().GetSnapshotsForGroupSnapshot(snapName, snapNamespace)
 		if err != nil {
 			log.VolumeSnapshotRestoreLog(snapRestore).Errorf("unable to get group snapshot details %v", err)
 			return err
 		}
 	} else {
 		// GetSnapshot Details
-		snapshot, err := k8s.Instance().GetSnapshot(snapName, snapNamespace)
+		snapshot, err := externalstorage.Instance().GetSnapshot(snapName, snapNamespace)
 		if err != nil {
 			return fmt.Errorf("unable to get get snapshot  details %s: %v",
 				snapName, err)
 		}
-		if err := k8s.Instance().ValidateSnapshot(snapName,
+		if err := externalstorage.Instance().ValidateSnapshot(snapName,
 			snapNamespace, false,
 			validateSnapshotRetryTimeout,
 			validateSnapshotTimeout); err != nil {
@@ -230,7 +235,7 @@ func (c *SnapshotRestoreController) handleFinal(snapRestore *stork_api.VolumeSna
 
 func markPVCForRestore(volumes []*stork_api.RestoreVolumeInfo) error {
 	for _, vol := range volumes {
-		pvc, err := k8s.Instance().GetPersistentVolumeClaim(vol.PVC, vol.Namespace)
+		pvc, err := core.Instance().GetPersistentVolumeClaim(vol.PVC, vol.Namespace)
 		if err != nil {
 			return fmt.Errorf("failed to get pvc details %v", err)
 		}
@@ -238,11 +243,11 @@ func markPVCForRestore(volumes []*stork_api.RestoreVolumeInfo) error {
 			pvc.Annotations = make(map[string]string)
 		}
 		pvc.Annotations[RestoreAnnotation] = "true"
-		newPvc, err := k8s.Instance().UpdatePersistentVolumeClaim(pvc)
+		newPvc, err := core.Instance().UpdatePersistentVolumeClaim(pvc)
 		if err != nil {
 			return err
 		}
-		pods, err := k8s.Instance().GetPodsUsingPVC(newPvc.Name, newPvc.Namespace)
+		pods, err := core.Instance().GetPodsUsingPVC(newPvc.Name, newPvc.Namespace)
 		if err != nil {
 			return err
 		}
@@ -251,11 +256,11 @@ func markPVCForRestore(volumes []*stork_api.RestoreVolumeInfo) error {
 				return fmt.Errorf("application not scheduled by stork scheduler")
 			}
 			log.PodLog(&pod).Infof("Deleting pod %v", pod.Name)
-			if err := k8s.Instance().DeletePod(pod.Name, pod.Namespace, true); err != nil {
+			if err := core.Instance().DeletePod(pod.Name, pod.Namespace, true); err != nil {
 				log.PodLog(&pod).Errorf("Error deleting pod %v: %v", pod.Name, err)
 				return err
 			}
-			if err := k8s.Instance().WaitForPodDeletion(pod.UID, pod.Namespace, 120*time.Second); err != nil {
+			if err := core.Instance().WaitForPodDeletion(pod.UID, pod.Namespace, 120*time.Second); err != nil {
 				log.PodLog(&pod).Errorf("Pod is not deleted %v:%v", pod.Name, err)
 				return err
 			}
@@ -268,7 +273,7 @@ func markPVCForRestore(volumes []*stork_api.RestoreVolumeInfo) error {
 func unmarkPVCForRestore(volumes []*stork_api.RestoreVolumeInfo) error {
 	// remove annotation from pvc's
 	for _, vol := range volumes {
-		pvc, err := k8s.Instance().GetPersistentVolumeClaim(vol.PVC, vol.Namespace)
+		pvc, err := core.Instance().GetPersistentVolumeClaim(vol.PVC, vol.Namespace)
 		if err != nil {
 			return fmt.Errorf("failed to get pvc details %v", err)
 		}
@@ -284,7 +289,7 @@ func unmarkPVCForRestore(volumes []*stork_api.RestoreVolumeInfo) error {
 			continue
 		}
 		delete(pvc.Annotations, RestoreAnnotation)
-		_, err = k8s.Instance().UpdatePersistentVolumeClaim(pvc)
+		_, err = core.Instance().UpdatePersistentVolumeClaim(pvc)
 		if err != nil {
 			log.PVCLog(pvc).Warnf("failed to update pvc %v", err)
 			return err
@@ -298,7 +303,7 @@ func initRestoreVolumesInfo(snapshotList []*snap_v1.VolumeSnapshot, snapRestore 
 	for _, snap := range snapshotList {
 		snapData := string(snap.Spec.SnapshotDataName)
 		logrus.Debugf("Getting volume ID for pvc %v", snap.Spec.PersistentVolumeClaimName)
-		pvc, err := k8s.Instance().GetPersistentVolumeClaim(snap.Spec.PersistentVolumeClaimName, snap.Metadata.Namespace)
+		pvc, err := core.Instance().GetPersistentVolumeClaim(snap.Spec.PersistentVolumeClaimName, snap.Metadata.Namespace)
 		if err != nil {
 			return fmt.Errorf("failed to get pvc details for snapshot %v", err)
 		}
@@ -324,7 +329,7 @@ func initRestoreVolumesInfo(snapshotList []*snap_v1.VolumeSnapshot, snapRestore 
 }
 
 func (c *SnapshotRestoreController) createCRD() error {
-	resource := k8s.CustomResource{
+	resource := apiextensions.CustomResource{
 		Name:    stork_api.SnapshotRestoreResourceName,
 		Plural:  stork_api.SnapshotRestoreResourcePlural,
 		Group:   stork_api.SchemeGroupVersion.Group,
@@ -332,12 +337,12 @@ func (c *SnapshotRestoreController) createCRD() error {
 		Scope:   apiextensionsv1beta1.NamespaceScoped,
 		Kind:    reflect.TypeOf(stork_api.VolumeSnapshotRestore{}).Name(),
 	}
-	err := k8s.Instance().CreateCRD(resource)
+	err := apiextensions.Instance().CreateCRD(resource)
 	if err != nil && !errors.IsAlreadyExists(err) {
 		return err
 	}
 
-	return k8s.Instance().ValidateCRD(resource, validateCRDTimeout, validateCRDInterval)
+	return apiextensions.Instance().ValidateCRD(resource, validateCRDTimeout, validateCRDInterval)
 }
 
 func (c *SnapshotRestoreController) handleDelete(snapRestore *stork_api.VolumeSnapshotRestore) error {

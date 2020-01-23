@@ -6,7 +6,8 @@ import (
 	"testing"
 
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/core"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/stretchr/testify/require"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -33,7 +34,7 @@ func TestBackupLocationNotFound(t *testing.T) {
 			Type: storkv1.BackupLocationS3,
 		},
 	}
-	_, err := k8s.Instance().CreateBackupLocation(backupLocation)
+	_, err := stork.Instance().CreateBackupLocation(backupLocation)
 	require.NoError(t, err, "Error creating backuplocation")
 
 	expected = `Error from server (NotFound): backuplocations.stork.libopenstorage.org "testlocation" not found`
@@ -58,7 +59,7 @@ func TestS3BackupLocation(t *testing.T) {
 			Type: storkv1.BackupLocationS3,
 		},
 	}
-	_, err := k8s.Instance().CreateBackupLocation(backupLocation)
+	_, err := stork.Instance().CreateBackupLocation(backupLocation)
 	require.NoError(t, err, "Error creating backuplocation")
 
 	expected := "\nS3:\n---\n" +
@@ -75,7 +76,7 @@ func TestS3BackupLocation(t *testing.T) {
 		DisableSSL:      true,
 		Region:          "us-west-1",
 	}
-	_, err = k8s.Instance().UpdateBackupLocation(backupLocation)
+	_, err = stork.Instance().UpdateBackupLocation(backupLocation)
 	require.NoError(t, err, "Error updating backuplocation")
 
 	expected = "\nS3:\n---\n" +
@@ -102,7 +103,7 @@ func TestAzureBackupLocation(t *testing.T) {
 			Type: storkv1.BackupLocationAzure,
 		},
 	}
-	_, err := k8s.Instance().CreateBackupLocation(backupLocation)
+	_, err := stork.Instance().CreateBackupLocation(backupLocation)
 	require.NoError(t, err, "Error creating backuplocation")
 
 	expected := "\nAzureBlob:\n----------\n" +
@@ -116,7 +117,7 @@ func TestAzureBackupLocation(t *testing.T) {
 		StorageAccountName: "accountname",
 		StorageAccountKey:  "accountkey",
 	}
-	_, err = k8s.Instance().UpdateBackupLocation(backupLocation)
+	_, err = stork.Instance().UpdateBackupLocation(backupLocation)
 	require.NoError(t, err, "Error updating backuplocation")
 
 	expected = "\nAzureBlob:\n----------\n" +
@@ -143,7 +144,7 @@ func TestGoogleBackupLocation(t *testing.T) {
 			Type: storkv1.BackupLocationGoogle,
 		},
 	}
-	_, err := k8s.Instance().CreateBackupLocation(backupLocation)
+	_, err := stork.Instance().CreateBackupLocation(backupLocation)
 	require.NoError(t, err, "Error creating backuplocation")
 
 	expected := "\nGoogleCloudStorage:\n-------------------\n" +
@@ -156,7 +157,7 @@ func TestGoogleBackupLocation(t *testing.T) {
 	backupLocation.Location.GoogleConfig = &storkv1.GoogleConfig{
 		ProjectID: "testproject",
 	}
-	_, err = k8s.Instance().UpdateBackupLocation(backupLocation)
+	_, err = stork.Instance().UpdateBackupLocation(backupLocation)
 	require.NoError(t, err, "Error updating backuplocation")
 
 	expected = "\nGoogleCloudStorage:\n-------------------\n" +
@@ -166,7 +167,7 @@ func TestGoogleBackupLocation(t *testing.T) {
 }
 
 func TestAllBackupLocation(t *testing.T) {
-	_, err := k8s.Instance().CreateNamespace("s3", nil)
+	_, err := core.Instance().CreateNamespace("s3", nil)
 	require.NoError(t, err, "Error creating s3 namespace")
 
 	backupLocation := &storkv1.BackupLocation{
@@ -186,10 +187,10 @@ func TestAllBackupLocation(t *testing.T) {
 			},
 		},
 	}
-	_, err = k8s.Instance().CreateBackupLocation(backupLocation)
+	_, err = stork.Instance().CreateBackupLocation(backupLocation)
 	require.NoError(t, err, "Error creating backuplocation")
 
-	_, err = k8s.Instance().CreateNamespace("azure", nil)
+	_, err = core.Instance().CreateNamespace("azure", nil)
 	require.NoError(t, err, "Error creating azure namespace")
 
 	backupLocation = &storkv1.BackupLocation{
@@ -206,10 +207,10 @@ func TestAllBackupLocation(t *testing.T) {
 			},
 		},
 	}
-	_, err = k8s.Instance().CreateBackupLocation(backupLocation)
+	_, err = stork.Instance().CreateBackupLocation(backupLocation)
 	require.NoError(t, err, "Error creating backuplocation")
 
-	_, err = k8s.Instance().CreateNamespace("google", nil)
+	_, err = core.Instance().CreateNamespace("google", nil)
 	require.NoError(t, err, "Error creating google namespace")
 
 	backupLocation = &storkv1.BackupLocation{
@@ -225,7 +226,7 @@ func TestAllBackupLocation(t *testing.T) {
 			},
 		},
 	}
-	_, err = k8s.Instance().CreateBackupLocation(backupLocation)
+	_, err = stork.Instance().CreateBackupLocation(backupLocation)
 	require.NoError(t, err, "Error creating backuplocation")
 
 	expected := "\nAzureBlob:\n----------\n" +

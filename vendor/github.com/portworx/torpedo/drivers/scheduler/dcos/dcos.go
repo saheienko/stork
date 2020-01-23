@@ -32,7 +32,7 @@ type dcos struct {
 	volDriverName string
 }
 
-func (d *dcos) Init(specDir, volDriver, nodeDriver, secretConfigMap string) error {
+func (d *dcos) Init(schedOpts scheduler.InitOptions) error {
 	privateAgents, err := MesosClient().GetPrivateAgentNodes()
 	if err != nil {
 		return err
@@ -48,7 +48,7 @@ func (d *dcos) Init(specDir, volDriver, nodeDriver, secretConfigMap string) erro
 		}
 	}
 
-	d.specFactory, err = spec.NewFactory(specDir, d)
+	d.specFactory, err = spec.NewFactory(schedOpts.SpecDir, schedOpts.VolDriverName, d)
 	if err != nil {
 		return err
 	}
@@ -58,7 +58,7 @@ func (d *dcos) Init(specDir, volDriver, nodeDriver, secretConfigMap string) erro
 		return err
 	}
 
-	d.volDriverName = volDriver
+	d.volDriverName = schedOpts.VolDriverName
 	return nil
 }
 
@@ -74,7 +74,7 @@ func (d *dcos) String() string {
 	return SchedName
 }
 
-func (d *dcos) ParseSpecs(specDir string) ([]interface{}, error) {
+func (d *dcos) ParseSpecs(specDir, storageProvisioner string) ([]interface{}, error) {
 	fileList := []string{}
 	if err := filepath.Walk(specDir, func(path string, f os.FileInfo, err error) error {
 		if !f.IsDir() {
@@ -334,7 +334,11 @@ func (d *dcos) WaitForDestroy(ctx *scheduler.Context, timeout time.Duration) err
 	return nil
 }
 
-func (d *dcos) DeleteTasks(ctx *scheduler.Context) error {
+func (d *dcos) DeleteTasks(ctx *scheduler.Context, opts *scheduler.DeleteTasksOptions) error {
+	if opts != nil {
+		logrus.Warnf("DCOS driver doesn't yet support delete task options")
+	}
+
 	for _, spec := range ctx.App.SpecList {
 		if obj, ok := spec.(*marathon.Application); ok {
 			if err := MarathonClient().KillApplicationTasks(obj.ID); err != nil {
@@ -414,7 +418,7 @@ func (d *dcos) GetVolumes(ctx *scheduler.Context) ([]*volume.Volume, error) {
 	}
 }
 
-func (d *dcos) ResizeVolume(cxt *scheduler.Context) ([]*volume.Volume, error) {
+func (d *dcos) ResizeVolume(cxt *scheduler.Context, configMap string) ([]*volume.Volume, error) {
 	//TODO implement this method
 	return nil, &errors.ErrNotSupported{
 		Type:      "Function",
@@ -557,6 +561,23 @@ func (d *dcos) GetTokenFromConfigMap(string) (string, error) {
 	}
 }
 
+func (d *dcos) AddLabelOnNode(n node.Node, lKey string, lValue string) error {
+	// TODO implement this method
+	return &errors.ErrNotSupported{
+		Type:      "Function",
+		Operation: "AddLabelOnNode()",
+	}
+}
+
+func (d *dcos) IsAutopilotEnabledForVolume(*volume.Volume) bool {
+	// TODO implement this method
+	return false
+}
+
+func (d *dcos) GetSpecAppEnvVar(ctx *scheduler.Context, key string) string {
+	// TODO implement this method
+	return ""
+}
 func init() {
 	d := &dcos{}
 	scheduler.Register(SchedName, d)

@@ -8,10 +8,6 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func init() {
-	SchemeBuilder.Register(&SchedulePolicy{}, &SchedulePolicyList{})
-}
-
 const (
 	// SchedulePolicyResourceName is name for "schedulepolicy" resource
 	SchedulePolicyResourceName = "schedulepolicy"

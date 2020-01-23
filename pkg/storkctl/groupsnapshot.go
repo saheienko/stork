@@ -6,11 +6,11 @@ import (
 	"strings"
 
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/spf13/cobra"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/printers"
 )
 
@@ -75,7 +75,7 @@ func newCreateGroupSnapshotCommand(cmdFactory Factory, ioStreams genericclioptio
 			}
 			groupSnapshot.Name = groupSnapshotName
 			groupSnapshot.Namespace = cmdFactory.GetNamespace()
-			_, err = k8s.Instance().CreateGroupSnapshot(groupSnapshot)
+			_, err = stork.Instance().CreateGroupSnapshot(groupSnapshot)
 			if err != nil {
 				util.CheckErr(err)
 				return
@@ -130,7 +130,7 @@ func newGetGroupVolumeSnapshotCommand(cmdFactory Factory, ioStreams genericcliop
 			if len(args) > 0 {
 				for _, groupSnapshotName := range args {
 					for _, ns := range namespaces {
-						groupSnapshot, err := k8s.Instance().GetGroupSnapshot(groupSnapshotName, ns)
+						groupSnapshot, err := stork.Instance().GetGroupSnapshot(groupSnapshotName, ns)
 						if err != nil {
 							util.CheckErr(err)
 							return
@@ -141,7 +141,7 @@ func newGetGroupVolumeSnapshotCommand(cmdFactory Factory, ioStreams genericcliop
 			} else {
 				// Get all
 				for _, ns := range namespaces {
-					groupSnapshotsInNamespace, err := k8s.Instance().ListGroupSnapshots(ns)
+					groupSnapshotsInNamespace, err := stork.Instance().ListGroupSnapshots(ns)
 					if err != nil {
 						util.CheckErr(err)
 						return
@@ -186,7 +186,7 @@ func newDeleteGroupVolumeSnapshotCommand(cmdFactory Factory, ioStreams genericcl
 
 func deleteGroupVolumeSnapshots(groupSnapshots []string, namespace string, ioStreams genericclioptions.IOStreams) {
 	for _, groupSnapshot := range groupSnapshots {
-		err := k8s.Instance().DeleteGroupSnapshot(groupSnapshot, namespace)
+		err := stork.Instance().DeleteGroupSnapshot(groupSnapshot, namespace)
 		if err != nil {
 			util.CheckErr(err)
 			return

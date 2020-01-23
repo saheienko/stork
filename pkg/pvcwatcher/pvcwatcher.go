@@ -8,7 +8,9 @@ import (
 	snapv1 "github.com/kubernetes-incubator/external-storage/snapshot/pkg/apis/crd/v1"
 	"github.com/libopenstorage/stork/drivers/volume"
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/core"
+	"github.com/portworx/sched-ops/k8s/storage"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
@@ -31,6 +33,7 @@ const (
 	scheduleCreatedAnnotation              = annotationPrefix + "snapshot-schedule-created"
 )
 
+// New creates a new instance of PVCWatcher.
 func New(mgr manager.Manager, d volume.Driver, r record.EventRecorder) *PVCWatcher {
 	return &PVCWatcher{
 		client:   mgr.GetClient(),
@@ -67,6 +70,7 @@ func (p *PVCWatcher) Start(mgr manager.Manager) error {
 	return c.Watch(&source.Kind{Type: &corev1.PersistentVolumeClaim{}}, &handler.EnqueueRequestForObject{})
 }
 
+// Reconcile handles snapshot schedule updates for persistent volume claims.
 func (p *PVCWatcher) Reconcile(request reconcile.Request) (reconcile.Result, error) {
 	logrus.Printf("Reconciling PVC %s/%s", request.Namespace, request.Name)
 
@@ -127,7 +131,7 @@ func (p *PVCWatcher) handleSnapshotScheduleUpdates(pvc *corev1.PersistentVolumeC
 	if storageClassName == "" {
 		return nil
 	}
-	storageClass, err := k8s.Instance().GetStorageClass(storageClassName)
+	storageClass, err := storage.Instance().GetStorageClass(storageClassName)
 	// Ignore if storageclass cannot be found
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -142,7 +146,7 @@ func (p *PVCWatcher) handleSnapshotScheduleUpdates(pvc *corev1.PersistentVolumeC
 	}
 	for snapshotScheduleName, policy := range policiesMap {
 		schedulePolicyName := policy.SchedulePolicyName
-		if _, err := k8s.Instance().GetSnapshotSchedule(snapshotScheduleName, pvc.Namespace); err == nil {
+		if _, err := stork.Instance().GetSnapshotSchedule(snapshotScheduleName, pvc.Namespace); err == nil {
 			continue
 		}
 
@@ -172,7 +176,7 @@ func (p *PVCWatcher) handleSnapshotScheduleUpdates(pvc *corev1.PersistentVolumeC
 				ReclaimPolicy:      policy.ReclaimPolicy,
 			},
 		}
-		_, err = k8s.Instance().CreateSnapshotSchedule(snapshotSchedule)
+		_, err = stork.Instance().CreateSnapshotSchedule(snapshotSchedule)
 		if err != nil {
 			p.Recorder.Event(pvc,
 				corev1.EventTypeWarning,
@@ -190,7 +194,7 @@ func (p *PVCWatcher) handleSnapshotScheduleUpdates(pvc *corev1.PersistentVolumeC
 			pvc.Annotations = make(map[string]string)
 		}
 		pvc.Annotations[scheduleCreatedAnnotation] = "yes"
-		_, err = k8s.Instance().UpdatePersistentVolumeClaim(pvc)
+		_, err = core.Instance().UpdatePersistentVolumeClaim(pvc)
 		if err != nil {
 			return err
 		}

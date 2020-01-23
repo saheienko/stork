@@ -116,7 +116,13 @@ func setup() error {
 
 	}
 	logrus.Infof("Using provisioner: %s", provisioner)
-	if err = schedulerDriver.Init("specs", volumeDriverName, nodeDriverName, authTokenConfigMap); err != nil {
+	err = schedulerDriver.Init(scheduler.InitOptions{
+		SpecDir:             "specs",
+		VolDriverName:       volumeDriverName,
+		NodeDriverName:      nodeDriverName,
+		SecretConfigMapName: authSecretConfigMap,
+	})
+	if err != nil {
 		return fmt.Errorf("Error initializing scheduler driver %v: %v", schedulerDriverName, err)
 	}
 

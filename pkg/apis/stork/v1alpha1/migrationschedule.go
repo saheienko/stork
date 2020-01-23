@@ -4,10 +4,6 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func init() {
-	SchemeBuilder.Register(&MigrationSchedule{}, &MigrationScheduleList{})
-}
-
 const (
 	// MigrationScheduleResourceName is name for "migrationschedule" resource
 	MigrationScheduleResourceName = "migrationschedule"

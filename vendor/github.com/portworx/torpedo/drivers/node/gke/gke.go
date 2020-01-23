@@ -28,6 +28,7 @@ func (g *gke) String() string {
 }
 
 func (g *gke) Init() error {
+	g.SSH.Init()
 
 	instanceGroup := os.Getenv("INSTANCE_GROUP")
 	if len(instanceGroup) != 0 {
@@ -45,8 +46,9 @@ func (g *gke) Init() error {
 	return nil
 }
 
-func (g *gke) SetASGClusterSize(count int64, timeout time.Duration) error {
-	err := g.ops.SetInstanceGroupSize(g.instanceGroup, count, timeout)
+func (g *gke) SetASGClusterSize(perZoneCount int64, timeout time.Duration) error {
+	// GCP SDK requires per zone cluster size
+	err := g.ops.SetInstanceGroupSize(g.instanceGroup, perZoneCount, timeout)
 	if err != nil {
 		logrus.Errorf("failed to set size of node pool %s. Error: %v", g.instanceGroup, err)
 		return err
@@ -75,11 +77,8 @@ func (g *gke) DeleteNode(node node.Node, timeout time.Duration) error {
 }
 
 func init() {
-
-	SSHDriver := ssh.SSH{}
-	SSHDriver.Init()
 	g := &gke{
-		SSH: SSHDriver,
+		SSH: ssh.SSH{},
 	}
 
 	node.Register(DriverName, g)

@@ -20,7 +20,7 @@ func (r *ResourceCollector) pvcToBeCollected(
 	}
 
 	pvcName := metadata.GetName()
-	pvc, err := r.k8sOps.GetPersistentVolumeClaim(pvcName, namespace)
+	pvc, err := r.core.GetPersistentVolumeClaim(pvcName, namespace)
 	if err != nil {
 		return false, err
 	}

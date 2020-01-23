@@ -28,7 +28,7 @@ import (
 	"k8s.io/kubernetes/pkg/apis/core/v1/helper"
 
 	"github.com/golang/glog"
-	"github.com/kubernetes-incubator/external-storage/lib/controller"
+	"github.com/kubernetes-sigs/sig-storage-lib-external-provisioner/controller"
 	"k8s.io/api/core/v1"
 	storage "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -110,7 +110,7 @@ func (p *nfsProvisioner) Delete(volume *v1.PersistentVolume) error {
 		return err
 	}
 	// Determine if the "archiveOnDelete" parameter exists.
-	// If it exists and has a falsey value, delete the directory.
+	// If it exists and has a false value, delete the directory.
 	// Otherwise, archive it.
 	archiveOnDelete, exists := storageClass.Parameters["archiveOnDelete"]
 	if exists {

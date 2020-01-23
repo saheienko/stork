@@ -4,10 +4,6 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func init() {
-	SchemeBuilder.Register(&ClusterDomainUpdate{}, &ClusterDomainUpdateList{})
-}
-
 const (
 	// ClusterDomainUpdateResourceName is name for "clusterdomainupdate" resource
 	ClusterDomainUpdateResourceName = "clusterdomainupdate"

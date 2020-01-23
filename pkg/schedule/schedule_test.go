@@ -8,11 +8,12 @@ import (
 
 	stork_api "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
 	fakeclient "github.com/libopenstorage/stork/pkg/client/clientset/versioned/fake"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/stretchr/testify/require"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	kubernetes "k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest/fake"
 )
 
 var fakeStorkClient *fakeclient.Clientset
@@ -23,8 +24,9 @@ func TestSchedule(t *testing.T) {
 	require.NoError(t, err, "Error adding stork scheme")
 	fakeStorkClient = fakeclient.NewSimpleClientset()
 	fakeKubeClient := kubernetes.NewSimpleClientset()
+	fakeSnapClient := &fake.RESTClient{}
 
-	k8s.Instance().SetClient(fakeKubeClient, nil, fakeStorkClient, nil, nil, nil, nil, nil)
+	stork.SetInstance(stork.New(fakeKubeClient, fakeStorkClient, fakeSnapClient))
 	t.Run("createDefaultPoliciesTest", createDefaultPoliciesTest)
 	t.Run("triggerIntervalRequiredTest", triggerIntervalRequiredTest)
 	t.Run("triggerDailyRequiredTest", triggerDailyRequiredTest)
@@ -41,11 +43,11 @@ func createDefaultPoliciesTest(t *testing.T) {
 
 func triggerIntervalRequiredTest(t *testing.T) {
 	defer func() {
-		err := k8s.Instance().DeleteSchedulePolicy("intervalpolicy")
+		err := stork.Instance().DeleteSchedulePolicy("intervalpolicy")
 		require.NoError(t, err, "Error cleaning up schedule policy")
 	}()
 
-	_, err := k8s.Instance().CreateSchedulePolicy(&stork_api.SchedulePolicy{
+	_, err := stork.Instance().CreateSchedulePolicy(&stork_api.SchedulePolicy{
 		ObjectMeta: meta.ObjectMeta{
 			Name: "intervalpolicy",
 		},
@@ -83,11 +85,11 @@ func triggerIntervalRequiredTest(t *testing.T) {
 
 func triggerDailyRequiredTest(t *testing.T) {
 	defer func() {
-		err := k8s.Instance().DeleteSchedulePolicy("dailypolicy")
+		err := stork.Instance().DeleteSchedulePolicy("dailypolicy")
 		require.NoError(t, err, "Error cleaning up schedule policy")
 	}()
 
-	_, err := k8s.Instance().CreateSchedulePolicy(&stork_api.SchedulePolicy{
+	_, err := stork.Instance().CreateSchedulePolicy(&stork_api.SchedulePolicy{
 		ObjectMeta: meta.ObjectMeta{
 			Name: "dailypolicy",
 		},
@@ -146,11 +148,11 @@ func triggerDailyRequiredTest(t *testing.T) {
 
 func triggerWeeklyRequiredTest(t *testing.T) {
 	defer func() {
-		err := k8s.Instance().DeleteSchedulePolicy("weeklypolicy")
+		err := stork.Instance().DeleteSchedulePolicy("weeklypolicy")
 		require.NoError(t, err, "Error cleaning up schedule policy")
 	}()
 
-	_, err := k8s.Instance().CreateSchedulePolicy(&stork_api.SchedulePolicy{
+	_, err := stork.Instance().CreateSchedulePolicy(&stork_api.SchedulePolicy{
 		ObjectMeta: meta.ObjectMeta{
 			Name: "weeklypolicy",
 		},
@@ -194,7 +196,7 @@ func triggerWeeklyRequiredTest(t *testing.T) {
 }
 
 func triggerMonthlyRequiredTest(t *testing.T) {
-	_, err := k8s.Instance().CreateSchedulePolicy(&stork_api.SchedulePolicy{
+	_, err := stork.Instance().CreateSchedulePolicy(&stork_api.SchedulePolicy{
 		ObjectMeta: meta.ObjectMeta{
 			Name: "monthlypolicy",
 		},
@@ -328,7 +330,7 @@ func validateSchedulePolicyTest(t *testing.T) {
 
 func policyRetainTest(t *testing.T) {
 	policyName := "policy"
-	policy, err := k8s.Instance().CreateSchedulePolicy(&stork_api.SchedulePolicy{
+	policy, err := stork.Instance().CreateSchedulePolicy(&stork_api.SchedulePolicy{
 		ObjectMeta: meta.ObjectMeta{
 			Name: policyName,
 		},
@@ -355,14 +357,14 @@ func policyRetainTest(t *testing.T) {
 	require.NoError(t, err, "Error getting retain")
 	require.Equal(t, stork_api.DefaultIntervalPolicyRetain, retain, "Wrong default retain for interval policy")
 	policy.Policy.Interval.Retain = 0
-	_, err = k8s.Instance().UpdateSchedulePolicy(policy)
+	_, err = stork.Instance().UpdateSchedulePolicy(policy)
 	require.NoError(t, err, "Error updating schedule policy")
 	retain, err = GetRetain(policyName, stork_api.SchedulePolicyTypeInterval)
 	require.NoError(t, err, "Error getting retain")
 	require.Equal(t, stork_api.DefaultIntervalPolicyRetain, retain, "Wrong default retain for interval policy")
 
 	policy.Policy.Interval.Retain = 5
-	_, err = k8s.Instance().UpdateSchedulePolicy(policy)
+	_, err = stork.Instance().UpdateSchedulePolicy(policy)
 	require.NoError(t, err, "Error updating schedule policy")
 
 	retain, err = GetRetain(policyName, stork_api.SchedulePolicyTypeInterval)
@@ -373,14 +375,14 @@ func policyRetainTest(t *testing.T) {
 	require.NoError(t, err, "Error getting retain")
 	require.Equal(t, stork_api.DefaultDailyPolicyRetain, retain, "Wrong default retain for daily policy")
 	policy.Policy.Daily.Retain = 0
-	_, err = k8s.Instance().UpdateSchedulePolicy(policy)
+	_, err = stork.Instance().UpdateSchedulePolicy(policy)
 	require.NoError(t, err, "Error updating schedule policy")
 	retain, err = GetRetain(policyName, stork_api.SchedulePolicyTypeDaily)
 	require.NoError(t, err, "Error getting retain")
 	require.Equal(t, stork_api.DefaultDailyPolicyRetain, retain, "Wrong default retain for daily policy")
 
 	policy.Policy.Daily.Retain = 10
-	_, err = k8s.Instance().UpdateSchedulePolicy(policy)
+	_, err = stork.Instance().UpdateSchedulePolicy(policy)
 	require.NoError(t, err, "Error updating schedule policy")
 	retain, err = GetRetain(policyName, stork_api.SchedulePolicyTypeDaily)
 	require.NoError(t, err, "Error getting retain")
@@ -390,14 +392,14 @@ func policyRetainTest(t *testing.T) {
 	require.NoError(t, err, "Error getting retain")
 	require.Equal(t, stork_api.DefaultWeeklyPolicyRetain, retain, "Wrong default retain for weekly policy")
 	policy.Policy.Weekly.Retain = 0
-	_, err = k8s.Instance().UpdateSchedulePolicy(policy)
+	_, err = stork.Instance().UpdateSchedulePolicy(policy)
 	require.NoError(t, err, "Error updating schedule policy")
 	retain, err = GetRetain(policyName, stork_api.SchedulePolicyTypeWeekly)
 	require.NoError(t, err, "Error getting retain")
 	require.Equal(t, stork_api.DefaultWeeklyPolicyRetain, retain, "Wrong default retain for weekly policy")
 
 	policy.Policy.Weekly.Retain = 20
-	_, err = k8s.Instance().UpdateSchedulePolicy(policy)
+	_, err = stork.Instance().UpdateSchedulePolicy(policy)
 	require.NoError(t, err, "Error updating schedule policy")
 	retain, err = GetRetain(policyName, stork_api.SchedulePolicyTypeWeekly)
 	require.NoError(t, err, "Error getting retain")
@@ -407,14 +409,14 @@ func policyRetainTest(t *testing.T) {
 	require.NoError(t, err, "Error getting retain")
 	require.Equal(t, stork_api.DefaultMonthlyPolicyRetain, retain, "Wrong default retain for monthly policy")
 	policy.Policy.Monthly.Retain = 0
-	_, err = k8s.Instance().UpdateSchedulePolicy(policy)
+	_, err = stork.Instance().UpdateSchedulePolicy(policy)
 	require.NoError(t, err, "Error updating schedule policy")
 	retain, err = GetRetain(policyName, stork_api.SchedulePolicyTypeMonthly)
 	require.NoError(t, err, "Error getting retain")
 	require.Equal(t, stork_api.DefaultMonthlyPolicyRetain, retain, "Wrong default retain for monthly policy")
 
 	policy.Policy.Monthly.Retain = 30
-	_, err = k8s.Instance().UpdateSchedulePolicy(policy)
+	_, err = stork.Instance().UpdateSchedulePolicy(policy)
 	require.NoError(t, err, "Error updating schedule policy")
 	retain, err = GetRetain(policyName, stork_api.SchedulePolicyTypeMonthly)
 	require.NoError(t, err, "Error getting retain")

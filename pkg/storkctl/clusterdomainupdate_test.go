@@ -8,7 +8,7 @@ import (
 	"time"
 
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,7 +26,7 @@ func createClusterDomainUpdate(t *testing.T, name string, clusterDomain string, 
 
 	testCommon(t, cmdArgs, nil, expected, false)
 
-	cdu, err := k8s.Instance().GetClusterDomainUpdate(name)
+	cdu, err := stork.Instance().GetClusterDomainUpdate(name)
 	require.NoError(t, err, "Error getting ClusterDomainUpdate")
 	require.Equal(t, name, cdu.Name, "ClusterDomainUpdate name mismatch")
 	require.Equal(t, cdu.Spec.ClusterDomain, clusterDomain, "ClusterDomain name mismatch")
@@ -67,7 +67,7 @@ func TestGetClusterDomainUpdateWithChanges(t *testing.T) {
 	testCommon(t, cmdArgs, nil, expected, false)
 
 	cdu.Status.Status = storkv1.ClusterDomainUpdateStatusFailed
-	_, err := k8s.Instance().UpdateClusterDomainUpdate(cdu)
+	_, err := stork.Instance().UpdateClusterDomainUpdate(cdu)
 	require.NoError(t, err, "Error updating cluster domain")
 
 	cmdArgs = []string{"get", "clusterdomainupdate", "test1"}
@@ -77,7 +77,7 @@ func TestGetClusterDomainUpdateWithChanges(t *testing.T) {
 	testCommon(t, cmdArgs, nil, expected, false)
 
 	cdu.Status.Status = storkv1.ClusterDomainUpdateStatusSuccessful
-	_, err = k8s.Instance().UpdateClusterDomainUpdate(cdu)
+	_, err = stork.Instance().UpdateClusterDomainUpdate(cdu)
 	require.NoError(t, err, "Error updating cluster domain")
 
 	cmdArgs = []string{"get", "clusterdomainupdate", "test1"}
@@ -105,7 +105,7 @@ func TestActivateClusterDomain(t *testing.T) {
 	expected := "Cluster Domain activate operation started successfully for zone2\n"
 	testCommon(t, cmdArgs, nil, expected, false)
 
-	cdus, err := k8s.Instance().ListClusterDomainUpdates()
+	cdus, err := stork.Instance().ListClusterDomainUpdates()
 	require.NoError(t, err, "Error listing ClusterDomainUpdate")
 	require.Equal(t, len(cdus.Items), 1, "ClusterDomainUpdates count mismatch")
 	cdu := cdus.Items[0]
@@ -145,7 +145,7 @@ func TestActivateAllClusterDomain(t *testing.T) {
 	expected := "Cluster Domain activate operation started successfully for zone3\nCluster Domain activate operation started successfully for zone4\n"
 	testCommon(t, cmdArgs, nil, expected, false)
 
-	cdus, err := k8s.Instance().ListClusterDomainUpdates()
+	cdus, err := stork.Instance().ListClusterDomainUpdates()
 	require.NoError(t, err, "Error listing ClusterDomainUpdate")
 	require.Equal(t, len(cdus.Items), 2, "ClusterDomainUpdates count mismatch")
 
@@ -191,7 +191,7 @@ func TestDeactivateClusterDomain(t *testing.T) {
 	expected := "Cluster Domain deactivate operation started successfully for zone2\n"
 	testCommon(t, cmdArgs, nil, expected, false)
 
-	cdus, err := k8s.Instance().ListClusterDomainUpdates()
+	cdus, err := stork.Instance().ListClusterDomainUpdates()
 	require.Equal(t, len(cdus.Items), 1, "ClusterDomainUpdates count mismatch")
 	cdu := cdus.Items[0]
 	require.NoError(t, err, "Error getting ClusterDomainUpdate")
@@ -296,7 +296,7 @@ func TestDectivateClusterDomainWaitFailed(t *testing.T) {
 
 func setClusterDomainStatus(name string, isFail bool, t *testing.T) {
 	time.Sleep(10 * time.Second)
-	cdu, err := k8s.Instance().GetClusterDomainUpdate(name)
+	cdu, err := stork.Instance().GetClusterDomainUpdate(name)
 	require.NoError(t, err, "Error getting cluster domain")
 	require.Equal(t, cdu.Status.Status, storkv1.ClusterDomainUpdateStatusInitial)
 	cdu.Status.Status = storkv1.ClusterDomainUpdateStatusSuccessful
@@ -305,6 +305,6 @@ func setClusterDomainStatus(name string, isFail bool, t *testing.T) {
 		cdu.Status.Reason = "Unavailable"
 	}
 
-	_, err = k8s.Instance().UpdateClusterDomainUpdate(cdu)
+	_, err = stork.Instance().UpdateClusterDomainUpdate(cdu)
 	require.NoError(t, err, "Error updating cluster domain")
 }

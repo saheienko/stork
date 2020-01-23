@@ -11,7 +11,8 @@ import (
 	stork_api "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
 	"github.com/libopenstorage/stork/pkg/log"
 	"github.com/libopenstorage/stork/pkg/schedule"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/apiextensions"
+	"github.com/portworx/sched-ops/k8s/externalstorage"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
@@ -40,6 +41,7 @@ const (
 	SnapshotSchedulePolicyTypeAnnotation = "stork.libopenstorage.org/snapshotSchedulePolicyType"
 )
 
+// NewSnapshotScheduleController creates a new instance of SnapshotScheduleController.
 func NewSnapshotScheduleController(mgr manager.Manager, r record.EventRecorder) *SnapshotScheduleController {
 	return &SnapshotScheduleController{
 		client:   mgr.GetClient(),
@@ -60,25 +62,27 @@ type SnapshotScheduleController struct {
 func (s *SnapshotScheduleController) Init(mgr manager.Manager) error {
 	err := s.createCRD()
 	if err != nil {
-		return err
+		return fmt.Errorf("register crd: %s", err)
 	}
+	mgr.GetCache()
 
 	// Create a new controller
 	c, err := controller.New("snapshot-schedule-controller", mgr, controller.Options{Reconciler: s})
 	if err != nil {
-		return err
+		return fmt.Errorf("setup controller: %v", err)
 	}
 
 	// Watch for changes to primary resource Migration
 	return c.Watch(&source.Kind{Type: &stork_api.VolumeSnapshotSchedule{}}, &handler.EnqueueRequestForObject{})
 }
 
-func (c *SnapshotScheduleController) Reconcile(request reconcile.Request) (reconcile.Result, error) {
+// Reconcile manages SnapshotSchedule resources.
+func (s *SnapshotScheduleController) Reconcile(request reconcile.Request) (reconcile.Result, error) {
 	logrus.Printf("Reconciling VolumeSnapshotSchedule %s/%s", request.Namespace, request.Name)
 
 	// Fetch the ApplicationBackup instance
 	snapshotSchedule := &stork_api.VolumeSnapshotSchedule{}
-	err := c.client.Get(context.TODO(), request.NamespacedName, snapshotSchedule)
+	err := s.client.Get(context.TODO(), request.NamespacedName, snapshotSchedule)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// Request object not found, could have been deleted after reconcile request.
@@ -90,7 +94,7 @@ func (c *SnapshotScheduleController) Reconcile(request reconcile.Request) (recon
 		return reconcile.Result{}, err
 	}
 
-	return reconcile.Result{}, c.handle(context.TODO(), snapshotSchedule)
+	return reconcile.Result{}, s.handle(context.TODO(), snapshotSchedule)
 }
 
 // Handle updates for VolumeSnapshotSchedule objects
@@ -164,7 +168,7 @@ func (s *SnapshotScheduleController) setDefaults(snapshotSchedule *stork_api.Vol
 }
 
 func getVolumeSnapshotStatus(name string, namespace string) (snapv1.VolumeSnapshotConditionType, error) {
-	snapshot, err := k8s.Instance().GetSnapshot(name, namespace)
+	snapshot, err := externalstorage.Instance().GetSnapshot(name, namespace)
 	if err != nil {
 		return snapv1.VolumeSnapshotConditionError, err
 	}
@@ -320,7 +324,7 @@ func (s *SnapshotScheduleController) startVolumeSnapshot(snapshotSchedule *stork
 			},
 		}
 	}
-	_, err = k8s.Instance().CreateSnapshot(snapshot)
+	_, err = externalstorage.Instance().CreateSnapshot(snapshot)
 	return err
 }
 
@@ -350,7 +354,7 @@ func (s *SnapshotScheduleController) pruneVolumeSnapshots(snapshotSchedule *stor
 			failedDeletes := make([]*stork_api.ScheduledVolumeSnapshotStatus, 0)
 			if numReady > int(retainNum) {
 				for i := 0; i < deleteBefore; i++ {
-					err := k8s.Instance().DeleteSnapshot(policyVolumeSnapshot[i].Name, snapshotSchedule.Namespace)
+					err := externalstorage.Instance().DeleteSnapshot(policyVolumeSnapshot[i].Name, snapshotSchedule.Namespace)
 					if err != nil && !errors.IsNotFound(err) {
 						log.VolumeSnapshotScheduleLog(snapshotSchedule).Warnf("Error deleting %v: %v", policyVolumeSnapshot[i].Name, err)
 						// Keep a track of the failed deletes
@@ -369,7 +373,7 @@ func (s *SnapshotScheduleController) pruneVolumeSnapshots(snapshotSchedule *stor
 }
 
 func (s *SnapshotScheduleController) createCRD() error {
-	resource := k8s.CustomResource{
+	resource := apiextensions.CustomResource{
 		Name:    stork_api.VolumeSnapshotScheduleResourceName,
 		Plural:  stork_api.VolumeSnapshotScheduleResourcePlural,
 		Group:   stork_api.SchemeGroupVersion.Group,
@@ -377,10 +381,10 @@ func (s *SnapshotScheduleController) createCRD() error {
 		Scope:   apiextensionsv1beta1.NamespaceScoped,
 		Kind:    reflect.TypeOf(stork_api.VolumeSnapshotSchedule{}).Name(),
 	}
-	err := k8s.Instance().CreateCRD(resource)
+	err := apiextensions.Instance().CreateCRD(resource)
 	if err != nil && !errors.IsAlreadyExists(err) {
 		return err
 	}
 
-	return k8s.Instance().ValidateCRD(resource, validateCRDTimeout, validateCRDInterval)
+	return apiextensions.Instance().ValidateCRD(resource, validateCRDTimeout, validateCRDInterval)
 }

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/stretchr/testify/require"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -45,10 +45,10 @@ func createClusterDomainsStatus(t *testing.T, name string) *storkv1.ClusterDomai
 			ClusterDomainInfos: append(activeDomainInfos, inactiveDomainInfos...),
 		},
 	}
-	_, err := k8s.Instance().CreateClusterDomainsStatus(cds)
+	_, err := stork.Instance().CreateClusterDomainsStatus(cds)
 	require.NoError(t, err, "Error creating ClusterDomainsStatus")
 
-	cds, err = k8s.Instance().GetClusterDomainsStatus(name)
+	cds, err = stork.Instance().GetClusterDomainsStatus(name)
 	require.NoError(t, err, "Error getting ClusterDomainsStatus")
 	require.Equal(t, name, cds.Name, "ClusterDomainsStatus name mismatch")
 	require.Equal(t, len(cds.Status.ClusterDomainInfos), 4, "Number of ClusterDomainInfo objects do not match")
@@ -122,7 +122,7 @@ func TestGetClusterDomainsStatusWithChanges(t *testing.T) {
 			break
 		}
 	}
-	_, err := k8s.Instance().UpdateClusterDomainsStatus(cds)
+	_, err := stork.Instance().UpdateClusterDomainsStatus(cds)
 	require.NoError(t, err, "Error updating cluster domains status")
 
 	cmdArgs = []string{"get", "clusterdomainsstatus", "test1"}

@@ -10,7 +10,8 @@ import (
 
 	"github.com/libopenstorage/stork/drivers/volume"
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/apiextensions"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/portworx/sched-ops/task"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
@@ -39,6 +40,7 @@ var (
 	clusterIDRegex = regexp.MustCompile("[^a-zA-Z0-9-.]+")
 )
 
+// NewClusterDomainsStatus creates a new instance of ClusterDomainsStatusController.
 func NewClusterDomainsStatus(mgr manager.Manager, d volume.Driver, r record.EventRecorder) *ClusterDomainsStatusController {
 	return &ClusterDomainsStatusController{
 		client:   mgr.GetClient(),
@@ -81,6 +83,7 @@ func (c *ClusterDomainsStatusController) Init(mgr manager.Manager) error {
 	return nil
 }
 
+// Reconcile updates the cluster about the changes in the ClusterDomainsStatus CRD.
 func (c *ClusterDomainsStatusController) Reconcile(request reconcile.Request) (reconcile.Result, error) {
 	logrus.Printf("Reconciling ClusterDomainsStatus %s/%s", request.Namespace, request.Name)
 
@@ -175,7 +178,7 @@ func (c *ClusterDomainsStatusController) createClusterDomainsStatusObject() {
 				Name: getNameForClusterDomainsStatus(clusterID),
 			},
 		}
-		if _, err := k8s.Instance().CreateClusterDomainsStatus(clusterDomainStatus); err != nil && !errors.IsAlreadyExists(err) {
+		if _, err := stork.Instance().CreateClusterDomainsStatus(clusterDomainStatus); err != nil && !errors.IsAlreadyExists(err) {
 			return nil, true, fmt.Errorf("failed to create cluster domain"+
 				" status object for driver %v: %v", c.Driver.String(), err)
 		}
@@ -190,7 +193,7 @@ func (c *ClusterDomainsStatusController) createClusterDomainsStatusObject() {
 
 // createCRD creates the CRD for ClusterDomainsStatus object
 func (c *ClusterDomainsStatusController) createCRD() error {
-	resource := k8s.CustomResource{
+	resource := apiextensions.CustomResource{
 		Name:       storkv1.ClusterDomainsStatusResourceName,
 		Plural:     storkv1.ClusterDomainsStatusPlural,
 		Group:      storkv1.SchemeGroupVersion.Group,
@@ -199,12 +202,12 @@ func (c *ClusterDomainsStatusController) createCRD() error {
 		Kind:       reflect.TypeOf(storkv1.ClusterDomainsStatus{}).Name(),
 		ShortNames: []string{storkv1.ClusterDomainsStatusShortName},
 	}
-	err := k8s.Instance().CreateCRD(resource)
+	err := apiextensions.Instance().CreateCRD(resource)
 	if err != nil && !errors.IsAlreadyExists(err) {
 		return err
 	}
 
-	return k8s.Instance().ValidateCRD(resource, validateCRDTimeout, validateCRDInterval)
+	return apiextensions.Instance().ValidateCRD(resource, validateCRDTimeout, validateCRDInterval)
 }
 
 func getNameForClusterDomainsStatus(clusterID string) string {

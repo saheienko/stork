@@ -34,9 +34,9 @@ type FakeMigrations struct {
 	ns   string
 }
 
-var migrationsResource = schema.GroupVersionResource{Group: "stork", Version: "v1alpha1", Resource: "migrations"}
+var migrationsResource = schema.GroupVersionResource{Group: "stork.libopenstorage.org", Version: "v1alpha1", Resource: "migrations"}
 
-var migrationsKind = schema.GroupVersionKind{Group: "stork", Version: "v1alpha1", Kind: "Migration"}
+var migrationsKind = schema.GroupVersionKind{Group: "stork.libopenstorage.org", Version: "v1alpha1", Kind: "Migration"}
 
 // Get takes name of the migration, and returns the corresponding migration object, and an error if there is any.
 func (c *FakeMigrations) Get(name string, options v1.GetOptions) (result *v1alpha1.Migration, err error) {
@@ -131,7 +131,7 @@ func (c *FakeMigrations) DeleteCollection(options *v1.DeleteOptions, listOptions
 // Patch applies the patch and returns the patched migration.
 func (c *FakeMigrations) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1alpha1.Migration, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(migrationsResource, c.ns, name, data, subresources...), &v1alpha1.Migration{})
+		Invokes(testing.NewPatchSubresourceAction(migrationsResource, c.ns, name, pt, data, subresources...), &v1alpha1.Migration{})
 
 	if obj == nil {
 		return nil, err

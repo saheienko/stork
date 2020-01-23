@@ -195,7 +195,7 @@ func (h *glusterfsPlugin) SnapshotRestore(snapshotData *crdv1.VolumeSnapshotData
 	glog.V(1).Infof("snapshot restored successfully to PV: %v", newSnapPV)
 
 	pv := &v1.PersistentVolumeSource{
-		Glusterfs: &v1.GlusterfsVolumeSource{
+		Glusterfs: &v1.GlusterfsPersistentVolumeSource{
 			Path:          newSnapPV,
 			EndpointsName: glusterfsEp,
 		},

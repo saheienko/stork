@@ -10,12 +10,12 @@ import (
 	"strings"
 
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/spf13/cobra"
+	"k8s.io/apimachinery/pkg/api/validation"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/kubernetes/pkg/apis/core/validation"
-	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/printers"
 )
 
@@ -46,7 +46,7 @@ func newGetClusterPairCommand(cmdFactory Factory, ioStreams genericclioptions.IO
 				clusterPairs = new(storkv1.ClusterPairList)
 				for _, pairName := range args {
 					for _, ns := range namespaces {
-						pair, err := k8s.Instance().GetClusterPair(pairName, ns)
+						pair, err := stork.Instance().GetClusterPair(pairName, ns)
 						if err != nil {
 							util.CheckErr(err)
 							return
@@ -57,7 +57,7 @@ func newGetClusterPairCommand(cmdFactory Factory, ioStreams genericclioptions.IO
 			} else {
 				var tempClusterPairs storkv1.ClusterPairList
 				for _, ns := range namespaces {
-					clusterPairs, err = k8s.Instance().ListClusterPairs(ns)
+					clusterPairs, err = stork.Instance().ListClusterPairs(ns)
 					if err != nil {
 						util.CheckErr(err)
 						return

@@ -8,11 +8,11 @@ import (
 	"time"
 
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/portworx/sched-ops/task"
 	"github.com/spf13/cobra"
-	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/printers"
 )
 
@@ -60,7 +60,7 @@ func newCreateApplicationRestoreCommand(cmdFactory Factory, ioStreams genericcli
 			}
 			applicationRestore.Name = applicationRestoreName
 			applicationRestore.Namespace = cmdFactory.GetNamespace()
-			_, err := k8s.Instance().CreateApplicationRestore(applicationRestore)
+			_, err := stork.Instance().CreateApplicationRestore(applicationRestore)
 			if err != nil {
 				util.CheckErr(err)
 				return
@@ -105,7 +105,7 @@ func newGetApplicationRestoreCommand(cmdFactory Factory, ioStreams genericcliopt
 				applicationRestores = new(storkv1.ApplicationRestoreList)
 				for _, applicationRestoreName := range args {
 					for _, ns := range namespaces {
-						applicationRestore, err := k8s.Instance().GetApplicationRestore(applicationRestoreName, ns)
+						applicationRestore, err := stork.Instance().GetApplicationRestore(applicationRestoreName, ns)
 						if err != nil {
 							util.CheckErr(err)
 							return
@@ -116,7 +116,7 @@ func newGetApplicationRestoreCommand(cmdFactory Factory, ioStreams genericcliopt
 			} else {
 				var tempApplicationRestores storkv1.ApplicationRestoreList
 				for _, ns := range namespaces {
-					applicationRestores, err = k8s.Instance().ListApplicationRestores(ns)
+					applicationRestores, err = stork.Instance().ListApplicationRestores(ns)
 					if err != nil {
 						util.CheckErr(err)
 						return
@@ -165,7 +165,7 @@ func newDeleteApplicationRestoreCommand(cmdFactory Factory, ioStreams genericcli
 
 func deleteApplicationRestores(applicationRestores []string, namespace string, ioStreams genericclioptions.IOStreams) {
 	for _, applicationRestore := range applicationRestores {
-		err := k8s.Instance().DeleteApplicationRestore(applicationRestore, namespace)
+		err := stork.Instance().DeleteApplicationRestore(applicationRestore, namespace)
 		if err != nil {
 			util.CheckErr(err)
 			return
@@ -231,7 +231,7 @@ func waitForApplicationRestore(name, namespace string, ioStreams genericclioptio
 	heading := fmt.Sprintf("%s\t\t%-20s", stage, status)
 	printMsg(heading, ioStreams.Out)
 	t := func() (interface{}, bool, error) {
-		restore, err := k8s.Instance().GetApplicationRestore(name, namespace)
+		restore, err := stork.Instance().GetApplicationRestore(name, namespace)
 		if err != nil {
 			util.CheckErr(err)
 			return "", false, err

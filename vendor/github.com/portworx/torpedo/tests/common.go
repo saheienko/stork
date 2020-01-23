@@ -4,19 +4,25 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/libopenstorage/openstorage/pkg/sched"
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 	"github.com/portworx/sched-ops/task"
 	"github.com/portworx/torpedo/drivers/node"
 	"github.com/sirupsen/logrus"
 
+	// import aks driver to invoke it's init
+	_ "github.com/portworx/torpedo/drivers/node/aks"
 	// import aws driver to invoke it's init
 	_ "github.com/portworx/torpedo/drivers/node/aws"
+	// import gke driver to invoke it's init
 	_ "github.com/portworx/torpedo/drivers/node/gke"
 
 	// import ssh driver to invoke it's init
@@ -31,7 +37,11 @@ import (
 
 	// import portworx driver to invoke it's init
 	_ "github.com/portworx/torpedo/drivers/volume/portworx"
+	// import gce driver to invoke it's init
+	_ "github.com/portworx/torpedo/drivers/volume/gce"
 	"github.com/portworx/torpedo/pkg/log"
+
+	yaml "gopkg.in/yaml.v2"
 )
 
 const (
@@ -59,6 +69,7 @@ const (
 	defaultNodeDriver                     = "ssh"
 	defaultStorageDriver                  = "pxd"
 	defaultLogLocation                    = "/mnt/torpedo_support_dir"
+	defaultBundleLocation                 = "/var/cores"
 	defaultLogLevel                       = "debug"
 	defaultAppScaleFactor                 = 1
 	defaultMinRunTimeMins                 = 0
@@ -68,6 +79,7 @@ const (
 	defaultStorageProvisioner             = "portworx"
 	defaultStorageNodesPerAZ              = 2
 	defaultAutoStorageNodeRecoveryTimeout = 30 * time.Minute
+	specObjAppWorkloadSizeEnvVar          = "SIZE"
 )
 
 const (
@@ -99,13 +111,19 @@ func InitInstance() {
 		token = ""
 	}
 
-	err = Inst().S.Init(Inst().SpecDir, Inst().V.String(), Inst().N.String(), Inst().ConfigMap)
-	expect(err).NotTo(haveOccurred())
-
-	err = Inst().V.Init(Inst().S.String(), Inst().N.String(), token, Inst().Provisioner)
+	err = Inst().S.Init(scheduler.InitOptions{
+		SpecDir:             Inst().SpecDir,
+		VolDriverName:       Inst().V.String(),
+		NodeDriverName:      Inst().N.String(),
+		SecretConfigMapName: Inst().ConfigMap,
+		CustomAppConfig:     Inst().CustomAppConfig,
+	})
 	expect(err).NotTo(haveOccurred())
 
 	err = Inst().N.Init()
+	expect(err).NotTo(haveOccurred())
+
+	err = Inst().V.Init(Inst().S.String(), Inst().N.String(), token, Inst().Provisioner)
 	expect(err).NotTo(haveOccurred())
 }
 
@@ -250,6 +268,33 @@ func ScheduleAndValidate(testname string) []*scheduler.Context {
 	return contexts
 }
 
+// ScheduleApplications schedules but does not wait for applications
+func ScheduleApplications(testname string) []*scheduler.Context {
+	var contexts []*scheduler.Context
+	var err error
+
+	Step("schedule applications", func() {
+		taskName := fmt.Sprintf("%s-%v", testname, Inst().InstanceID)
+		contexts, err = Inst().S.Schedule(taskName, scheduler.ScheduleOptions{
+			AppKeys:            Inst().AppList,
+			StorageProvisioner: Inst().Provisioner,
+		})
+		expect(err).NotTo(haveOccurred())
+		expect(contexts).NotTo(beEmpty())
+	})
+
+	return contexts
+}
+
+// ValidateApplications validates applications
+func ValidateApplications(contexts []*scheduler.Context) {
+	Step("validate applications", func() {
+		for _, ctx := range contexts {
+			ValidateContext(ctx)
+		}
+	})
+}
+
 // StartVolDriverAndWait starts volume driver on given app nodes
 func StartVolDriverAndWait(appNodes []node.Node) {
 	context(fmt.Sprintf("starting volume driver %s", Inst().V.String()), func() {
@@ -263,10 +308,6 @@ func StartVolDriverAndWait(appNodes []node.Node) {
 		Step(fmt.Sprintf("wait for volume driver to start on nodes: %v", appNodes), func() {
 			for _, n := range appNodes {
 				err := Inst().V.WaitDriverUpOnNode(n, Inst().DriverStartTimeout)
-				if err != nil {
-					diagsErr := Inst().V.CollectDiags(n)
-					expect(diagsErr).NotTo(haveOccurred())
-				}
 				expect(err).NotTo(haveOccurred())
 			}
 		})
@@ -303,10 +344,6 @@ func CrashVolDriverAndWait(appNodes []node.Node) {
 		Step(fmt.Sprintf("wait for volume driver to start on nodes: %v", appNodes), func() {
 			for _, n := range appNodes {
 				err := Inst().V.WaitDriverUpOnNode(n, Inst().DriverStartTimeout)
-				if err != nil {
-					diagsErr := Inst().V.CollectDiags(n)
-					expect(diagsErr).NotTo(haveOccurred())
-				}
 				expect(err).NotTo(haveOccurred())
 			}
 		})
@@ -329,6 +366,154 @@ func ValidateAndDestroy(contexts []*scheduler.Context, opts map[string]bool) {
 	})
 }
 
+// AddLabelsOnNode adds labels on the node
+func AddLabelsOnNode(n node.Node, labels map[string]string) error {
+	for labelKey, labelValue := range labels {
+		if err := Inst().S.AddLabelOnNode(n, labelKey, labelValue); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateStoragePools is the ginkgo spec for validating storage pools
+func ValidateStoragePools(contexts []*scheduler.Context) {
+	var err error
+	strExpansionEnabled, err := Inst().V.IsStorageExpansionEnabled()
+	expect(err).NotTo(haveOccurred())
+
+	if strExpansionEnabled {
+		var wSize uint64
+		var workloadSizesByPool = make(map[string]uint64)
+		logrus.Debugf("storage expansion enabled on at least one storage pool")
+		// for each replica set add the workloadSize of app workload to each storage pool where replica resides on
+		for _, ctx := range contexts {
+			Step(fmt.Sprintf("get replica sets for app: %s's volumes", ctx.App.Key), func() {
+				appVolumes, err := Inst().S.GetVolumes(ctx)
+				expect(err).NotTo(haveOccurred())
+				expect(appVolumes).NotTo(beEmpty())
+				for _, vol := range appVolumes {
+					if Inst().S.IsAutopilotEnabledForVolume(vol) {
+						replicaSets, err := Inst().V.GetReplicaSets(vol)
+						expect(err).NotTo(haveOccurred())
+						expect(replicaSets).NotTo(beEmpty())
+						for _, poolUUID := range replicaSets[0].PoolUuids {
+							wSize, err = getWorkloadSizeFromAppSpec(ctx)
+							expect(err).NotTo(haveOccurred())
+							workloadSizesByPool[poolUUID] += wSize
+							logrus.Debugf("pool: %s workloadSize increased by: %d total now: %d", poolUUID, wSize, workloadSizesByPool[poolUUID])
+						}
+					}
+				}
+			})
+		}
+
+		// update each storage pool with the app workload sizes
+		nodes := node.GetWorkerNodes()
+		expect(nodes).NotTo(beEmpty())
+		for _, n := range nodes {
+			for id, sPool := range n.StoragePools {
+				if workloadSizeForPool, ok := workloadSizesByPool[sPool.Uuid]; ok {
+					n.StoragePools[id].WorkloadSize = workloadSizeForPool
+				}
+
+				logrus.Debugf("pool: %s InitialSize: %d WorkloadSize: %d", sPool.Uuid, sPool.StoragePoolAtInit.TotalSize, n.StoragePools[id].WorkloadSize)
+			}
+			err = node.UpdateNode(n)
+			expect(err).NotTo(haveOccurred())
+		}
+	}
+
+	err = Inst().V.ValidateStoragePools()
+	expect(err).NotTo(haveOccurred())
+
+}
+
+func getWorkloadSizeFromAppSpec(context *scheduler.Context) (uint64, error) {
+	var err error
+	var wSize uint64
+	appEnvVar := Inst().S.GetSpecAppEnvVar(context, specObjAppWorkloadSizeEnvVar)
+	if appEnvVar != "" {
+		wSize, err = strconv.ParseUint(appEnvVar, 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("can't parse value %v of environment variable. Err: %v", appEnvVar, err)
+		}
+
+		// if size less than 1024 we assume that value is in Gb
+		if wSize < 1024 {
+			return wSize * 1024 * 1024 * 1024, nil
+		}
+	}
+	return 0, nil
+}
+
+// DescribeNamespace takes in the scheduler contexts and describes each object within the test context.
+func DescribeNamespace(contexts []*scheduler.Context) {
+	context(fmt.Sprintf("generating namespace info..."), func() {
+		Step(fmt.Sprintf("Describe Namespace objects for test %s \n", ginkgo.CurrentGinkgoTestDescription().TestText), func() {
+			for _, ctx := range contexts {
+				filename := fmt.Sprintf("%s/%s-%s.namespace.log", defaultBundleLocation, ctx.App.Key, ctx.UID)
+				namespaceDescription, err := Inst().S.Describe(ctx)
+				if err != nil {
+					logrus.Errorf("failed to describe namespace for [%s] %s. Cause: %v", ctx.UID, ctx.App.Key, err)
+				}
+				if err = ioutil.WriteFile(filename, []byte(namespaceDescription), 0755); err != nil {
+					logrus.Errorf("failed to save file %s. Cause: %v", filename, err)
+				}
+			}
+		})
+	})
+}
+
+// CollectSupport creates a support bundle
+func CollectSupport() {
+	context(fmt.Sprintf("generating support bundle..."), func() {
+		Step(fmt.Sprintf("save all useful logs on each node"), func() {
+			nodes := node.GetWorkerNodes()
+			expect(nodes).NotTo(beEmpty())
+
+			for _, n := range nodes {
+				if !n.IsStorageDriverInstalled {
+					continue
+				}
+
+				logrus.Infof("collecting diags from %s", n.Name)
+				Inst().V.CollectDiags(n)
+
+				journalCmd := fmt.Sprintf("journalctl -l > %s/all_journal_%v.log", Inst().BundleLocation, time.Now().Format(time.RFC3339))
+				logrus.Infof("saving journal output on %s", n.Name)
+				runCmd(journalCmd, n)
+
+				logrus.Infof("saving portworx journal output on %s", n.Name)
+				runCmd(fmt.Sprintf("journalctl -lu portworx* > %s/portworx.log", Inst().BundleLocation), n)
+
+				logrus.Infof("saving kubelet journal output on %s", n.Name)
+				runCmd(fmt.Sprintf("journalctl -lu kubelet* > %s/kubelet.log", Inst().BundleLocation), n)
+
+				logrus.Infof("saving dmesg output on %s", n.Name)
+				runCmd(fmt.Sprintf("dmesg -T > %s/dmesg.log", Inst().BundleLocation), n)
+
+				logrus.Infof("saving disk list on %s", n.Name)
+				runCmd(fmt.Sprintf("lsblk > %s/lsblk.log", Inst().BundleLocation), n)
+
+				logrus.Infof("saving mount list on %s", n.Name)
+				runCmd(fmt.Sprintf("cat /proc/mounts > %s/mounts.log", Inst().BundleLocation), n)
+			}
+		})
+	})
+}
+
+func runCmd(cmd string, n node.Node) {
+	_, err := Inst().N.RunCommand(n, cmd, node.ConnectionOpts{
+		Timeout:         defaultTimeout,
+		TimeBeforeRetry: defaultRetryInterval,
+		Sudo:            true,
+	})
+	if err != nil {
+		logrus.Warnf("failed to run cmd: %s. err: %v", cmd, err)
+	}
+}
+
 // PerformSystemCheck check if core files are present on each node
 func PerformSystemCheck() {
 	context(fmt.Sprintf("checking for core files..."), func() {
@@ -349,6 +534,15 @@ func PerformSystemCheck() {
 			}
 		})
 	})
+}
+
+// AfterEachTest runs collect support bundle after each test when it fails
+func AfterEachTest(contexts []*scheduler.Context) {
+	logrus.Debugf("contexts: %v", contexts)
+	if ginkgo.CurrentGinkgoTestDescription().Failed {
+		CollectSupport()
+		DescribeNamespace(contexts)
+	}
 }
 
 // Inst returns the Torpedo instances
@@ -380,6 +574,8 @@ type Torpedo struct {
 	DriverStartTimeout                  time.Duration
 	AutoStorageNodeRecoveryTimeout      time.Duration
 	ConfigMap                           string
+	BundleLocation                      string
+	CustomAppConfig                     map[string]scheduler.AppConfig
 }
 
 // ParseFlags parses command line flags
@@ -398,6 +594,9 @@ func ParseFlags() {
 	var destroyAppTimeout time.Duration
 	var driverStartTimeout time.Duration
 	var autoStorageNodeRecoveryTimeout time.Duration
+	var bundleLocation string
+	var customConfigPath string
+	var customAppConfig map[string]scheduler.AppConfig
 
 	flag.StringVar(&s, schedulerCliFlag, defaultScheduler, "Name of the scheduler to use")
 	flag.StringVar(&n, nodeDriverCliFlag, defaultNodeDriver, "Name of the node driver to use")
@@ -420,6 +619,8 @@ func ParseFlags() {
 	flag.DurationVar(&driverStartTimeout, "driver-start-timeout", defaultTimeout, "Maximum wait volume driver startup")
 	flag.DurationVar(&autoStorageNodeRecoveryTimeout, "storagenode-recovery-timeout", defaultAutoStorageNodeRecoveryTimeout, "Maximum wait time in minutes for storageless nodes to transition to storagenodes in case of ASG")
 	flag.StringVar(&configMapName, configMapFlag, "", "Name of the config map to be used.")
+	flag.StringVar(&bundleLocation, "bundle-location", defaultBundleLocation, "Path to support bundle output files")
+	flag.StringVar(&customConfigPath, "custom-config", "", "Path to custom configuration files")
 
 	flag.Parse()
 
@@ -428,15 +629,31 @@ func ParseFlags() {
 		logrus.Fatalf("failed to parse app list: %v. err: %v", appListCSV, err)
 	}
 
+	sched.Init(time.Second)
+
 	if schedulerDriver, err = scheduler.Get(s); err != nil {
 		logrus.Fatalf("Cannot find scheduler driver for %v. Err: %v\n", s, err)
 	} else if volumeDriver, err = volume.Get(v); err != nil {
 		logrus.Fatalf("Cannot find volume driver for %v. Err: %v\n", v, err)
 	} else if nodeDriver, err = node.Get(n); err != nil {
 		logrus.Fatalf("Cannot find node driver for %v. Err: %v\n", n, err)
-	} else if err := os.MkdirAll(logLoc, os.ModeDir); err != nil {
+	} else if err = os.MkdirAll(logLoc, os.ModeDir); err != nil {
 		logrus.Fatalf("Cannot create path %s for saving support bundle. Error: %v", logLoc, err)
 	} else {
+		if _, err = os.Stat(customConfigPath); err == nil {
+			var data []byte
+
+			logrus.Infof("Using custom app config file %s", customConfigPath)
+			data, err = ioutil.ReadFile(customConfigPath)
+			if err != nil {
+				logrus.Fatalf("Cannot read file %s. Error: %v", customConfigPath, err)
+			}
+			err = yaml.Unmarshal(data, &customAppConfig)
+			if err != nil {
+				logrus.Fatalf("Cannot unmarshal yml %s. Error: %v", customConfigPath, err)
+			}
+			logrus.Infof("Parsed custom app config file: %+v", customAppConfig)
+		}
 		once.Do(func() {
 			instance = &Torpedo{
 				InstanceID:                          time.Now().Format("01-02-15h04m05s"),
@@ -458,6 +675,8 @@ func ParseFlags() {
 				DriverStartTimeout:                  driverStartTimeout,
 				AutoStorageNodeRecoveryTimeout:      autoStorageNodeRecoveryTimeout,
 				ConfigMap:                           configMapName,
+				BundleLocation:                      bundleLocation,
+				CustomAppConfig:                     customAppConfig,
 			}
 		})
 	}
@@ -468,6 +687,7 @@ func ParseFlags() {
 		logrus.Fatalf("Failed to set log level due to Err: %v", err)
 	}
 	logrus.SetLevel(logLvl)
+
 }
 
 func splitCsv(in string) ([]string, error) {
@@ -485,5 +705,5 @@ func splitCsv(in string) ([]string, error) {
 func init() {
 	logrus.SetLevel(logrus.InfoLevel)
 	logrus.StandardLogger().Hooks.Add(log.NewHook())
-	logrus.SetOutput(ginkgo.GinkgoWriter)
+	logrus.SetOutput(os.Stdout)
 }

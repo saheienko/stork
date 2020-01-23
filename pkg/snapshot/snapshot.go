@@ -2,19 +2,19 @@ package snapshot
 
 import (
 	"fmt"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sync"
 
-	"github.com/kubernetes-incubator/external-storage/lib/controller"
 	"github.com/kubernetes-incubator/external-storage/snapshot/pkg/client"
 	snapshotvolume "github.com/kubernetes-incubator/external-storage/snapshot/pkg/volume"
+	"github.com/kubernetes-sigs/sig-storage-lib-external-provisioner/controller"
 	"github.com/libopenstorage/stork/drivers/volume"
 	"github.com/libopenstorage/stork/pkg/snapshot/controllers"
-	"github.com/portworx/sched-ops/k8s"
+	schederrors "github.com/portworx/sched-ops/k8s/errors"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
 const (
@@ -74,7 +74,7 @@ func (s *Snapshot) Start(mgr manager.Manager) error {
 	}
 
 	if clientset == nil {
-		return k8s.ErrK8SApiAccountNotSet
+		return schederrors.ErrK8SApiAccountNotSet
 	}
 
 	// Start the provisioner controller

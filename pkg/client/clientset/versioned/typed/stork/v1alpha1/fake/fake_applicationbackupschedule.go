@@ -34,9 +34,9 @@ type FakeApplicationBackupSchedules struct {
 	ns   string
 }
 
-var applicationbackupschedulesResource = schema.GroupVersionResource{Group: "stork", Version: "v1alpha1", Resource: "applicationbackupschedules"}
+var applicationbackupschedulesResource = schema.GroupVersionResource{Group: "stork.libopenstorage.org", Version: "v1alpha1", Resource: "applicationbackupschedules"}
 
-var applicationbackupschedulesKind = schema.GroupVersionKind{Group: "stork", Version: "v1alpha1", Kind: "ApplicationBackupSchedule"}
+var applicationbackupschedulesKind = schema.GroupVersionKind{Group: "stork.libopenstorage.org", Version: "v1alpha1", Kind: "ApplicationBackupSchedule"}
 
 // Get takes name of the applicationBackupSchedule, and returns the corresponding applicationBackupSchedule object, and an error if there is any.
 func (c *FakeApplicationBackupSchedules) Get(name string, options v1.GetOptions) (result *v1alpha1.ApplicationBackupSchedule, err error) {
@@ -131,7 +131,7 @@ func (c *FakeApplicationBackupSchedules) DeleteCollection(options *v1.DeleteOpti
 // Patch applies the patch and returns the patched applicationBackupSchedule.
 func (c *FakeApplicationBackupSchedules) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1alpha1.ApplicationBackupSchedule, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(applicationbackupschedulesResource, c.ns, name, data, subresources...), &v1alpha1.ApplicationBackupSchedule{})
+		Invokes(testing.NewPatchSubresourceAction(applicationbackupschedulesResource, c.ns, name, pt, data, subresources...), &v1alpha1.ApplicationBackupSchedule{})
 
 	if obj == nil {
 		return nil, err

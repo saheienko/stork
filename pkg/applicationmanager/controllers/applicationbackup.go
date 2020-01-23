@@ -10,16 +10,14 @@ import (
 	"time"
 
 	"github.com/libopenstorage/stork/drivers/volume"
-	"github.com/libopenstorage/stork/pkg/apis/stork"
 	stork_api "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/libopenstorage/stork/pkg/controller"
 	"github.com/libopenstorage/stork/pkg/crypto"
 	"github.com/libopenstorage/stork/pkg/log"
 	"github.com/libopenstorage/stork/pkg/objectstore"
 	"github.com/libopenstorage/stork/pkg/resourcecollector"
 	"github.com/libopenstorage/stork/pkg/rule"
-	"github.com/operator-framework/operator-sdk/pkg/sdk"
 	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/apiextensions"
 	"github.com/sirupsen/logrus"
 	"gocloud.dev/gcerrors"
 	v1 "k8s.io/api/core/v1"
@@ -28,9 +26,14 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/record"
+	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 const (
@@ -52,15 +55,28 @@ var backupCancelBackoff = wait.Backoff{
 	Steps:    backupCancelBackoffSteps,
 }
 
+// NewApplicationBackup creates a new instance of ApplicationBackupController.
+func NewApplicationBackup(mgr manager.Manager, r record.EventRecorder, rc resourcecollector.ResourceCollector) *ApplicationBackupController {
+	return &ApplicationBackupController{
+		client:            mgr.GetClient(),
+		scheme:            mgr.GetScheme(),
+		Recorder:          r,
+		ResourceCollector: rc,
+	}
+}
+
 // ApplicationBackupController reconciles applicationbackup objects
 type ApplicationBackupController struct {
+	client runtimeclient.Client
+	scheme *runtime.Scheme
+
 	Recorder             record.EventRecorder
 	ResourceCollector    resourcecollector.ResourceCollector
 	backupAdminNamespace string
 }
 
 // Init Initialize the application backup controller
-func (a *ApplicationBackupController) Init(backupAdminNamespace string) error {
+func (a *ApplicationBackupController) Init(mgr manager.Manager, backupAdminNamespace string) error {
 	err := a.createCRD()
 	if err != nil {
 		return err
@@ -72,15 +88,35 @@ func (a *ApplicationBackupController) Init(backupAdminNamespace string) error {
 		return err
 	}
 
-	return controller.Register(
-		&schema.GroupVersionKind{
-			Group:   stork.GroupName,
-			Version: stork_api.SchemeGroupVersion.Version,
-			Kind:    reflect.TypeOf(stork_api.ApplicationBackup{}).Name(),
-		},
-		"",
-		resyncPeriod,
-		a)
+	// Create a new controller
+	c, err := controller.New("application-backup-controller", mgr, controller.Options{Reconciler: a})
+	if err != nil {
+		return err
+	}
+
+	// Watch for changes to primary resource Migration
+	return c.Watch(&source.Kind{Type: &stork_api.ApplicationBackup{}}, &handler.EnqueueRequestForObject{})
+}
+
+// Reconcile updates for ApplicationBackup objects.
+func (a *ApplicationBackupController) Reconcile(request reconcile.Request) (reconcile.Result, error) {
+	logrus.Printf("Reconciling ApplicationBackup %s/%s", request.Namespace, request.Name)
+
+	// Fetch the ApplicationBackup instance
+	backup := &stork_api.ApplicationBackup{}
+	err := a.client.Get(context.TODO(), request.NamespacedName, backup)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Request object not found, could have been deleted after reconcile request.
+			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
+			// Return and don't requeue
+			return reconcile.Result{}, nil
+		}
+		// Error reading the object - requeue the request.
+		return reconcile.Result{}, err
+	}
+
+	return reconcile.Result{}, a.handle(context.TODO(), backup)
 }
 
 func setKind(snap *stork_api.ApplicationBackup) {
@@ -121,128 +157,125 @@ func (a *ApplicationBackupController) setDefaults(backup *stork_api.ApplicationB
 	}
 }
 
-// Handle updates for ApplicationBackup objects
-func (a *ApplicationBackupController) Handle(ctx context.Context, event sdk.Event) error {
-	switch o := event.Object.(type) {
-	case *stork_api.ApplicationBackup:
-		backup := o
-		if event.Deleted {
-			return a.deleteBackup(backup)
-		}
+// handle updates for ApplicationBackup objects
+func (a *ApplicationBackupController) handle(ctx context.Context, backup *stork_api.ApplicationBackup) error {
+	if backup.DeletionTimestamp != nil {
+		return a.deleteBackup(backup)
+	}
 
-		// Check whether namespace is allowed to be backed before each stage
-		// Restrict backup to only the namespace that the object belongs
-		// except for the namespace designated by the admin
-		if !a.namespaceBackupAllowed(backup) {
-			err := fmt.Errorf("Spec.Namespaces should only contain the current namespace")
-			log.ApplicationBackupLog(backup).Errorf(err.Error())
+	// Check whether namespace is allowed to be backed before each stage
+	// Restrict backup to only the namespace that the object belongs
+	// except for the namespace designated by the admin
+	if !a.namespaceBackupAllowed(backup) {
+		err := fmt.Errorf("Spec.Namespaces should only contain the current namespace")
+		log.ApplicationBackupLog(backup).Errorf(err.Error())
+		a.Recorder.Event(backup,
+			v1.EventTypeWarning,
+			string(stork_api.ApplicationBackupStatusFailed),
+			err.Error())
+		return nil
+	}
+
+	var terminationChannels []chan bool
+	var err error
+
+	a.setDefaults(backup)
+	switch backup.Status.Stage {
+	case stork_api.ApplicationBackupStageInitial:
+		// Make sure the namespaces exist
+		for _, ns := range backup.Spec.Namespaces {
+			_, err := k8s.Instance().GetNamespace(ns)
+			if err != nil {
+				backup.Status.Status = stork_api.ApplicationBackupStatusFailed
+				backup.Status.Stage = stork_api.ApplicationBackupStageFinal
+				backup.Status.FinishTimestamp = metav1.Now()
+				err = fmt.Errorf("error getting namespace %v: %v", ns, err)
+				log.ApplicationBackupLog(backup).Errorf(err.Error())
+				a.Recorder.Event(backup,
+					v1.EventTypeWarning,
+					string(stork_api.ApplicationBackupStatusFailed),
+					err.Error())
+				err = a.client.Update(ctx, backup)
+				if err != nil {
+					log.ApplicationBackupLog(backup).Errorf("Error updating")
+				}
+				return nil
+			}
+		}
+		// Make sure the rules exist if configured
+		if backup.Spec.PreExecRule != "" {
+			_, err := k8s.Instance().GetRule(backup.Spec.PreExecRule, backup.Namespace)
+			if err != nil {
+				message := fmt.Sprintf("Error getting PreExecRule %v: %v", backup.Spec.PreExecRule, err)
+				log.ApplicationBackupLog(backup).Errorf(message)
+				a.Recorder.Event(backup,
+					v1.EventTypeWarning,
+					string(stork_api.ApplicationBackupStatusFailed),
+					message)
+				return nil
+			}
+		}
+		if backup.Spec.PostExecRule != "" {
+			_, err := k8s.Instance().GetRule(backup.Spec.PostExecRule, backup.Namespace)
+			if err != nil {
+				message := fmt.Sprintf("Error getting PostExecRule %v: %v", backup.Spec.PreExecRule, err)
+				log.ApplicationBackupLog(backup).Errorf(message)
+				a.Recorder.Event(backup,
+					v1.EventTypeWarning,
+					string(stork_api.ApplicationBackupStatusFailed),
+					message)
+				return nil
+			}
+		}
+		fallthrough
+	case stork_api.ApplicationBackupStagePreExecRule:
+		terminationChannels, err = a.runPreExecRule(backup)
+		if err != nil {
+			message := fmt.Sprintf("Error running PreExecRule: %v", err)
+			log.ApplicationBackupLog(backup).Errorf(message)
 			a.Recorder.Event(backup,
 				v1.EventTypeWarning,
 				string(stork_api.ApplicationBackupStatusFailed),
-				err.Error())
+				message)
+			backup.Status.Stage = stork_api.ApplicationBackupStageInitial
+			backup.Status.Status = stork_api.ApplicationBackupStatusInitial
+			err := a.client.Update(ctx, backup)
+			if err != nil {
+				return err
+			}
+			return nil
+		}
+		fallthrough
+	case stork_api.ApplicationBackupStageVolumes:
+		err := a.backupVolumes(backup, terminationChannels)
+		if err != nil {
+			message := fmt.Sprintf("Error backing up volumes: %v", err)
+			log.ApplicationBackupLog(backup).Errorf(message)
+			a.Recorder.Event(backup,
+				v1.EventTypeWarning,
+				string(stork_api.ApplicationBackupStatusFailed),
+				message)
+			return nil
+		}
+	case stork_api.ApplicationBackupStageApplications:
+		err := a.backupResources(backup)
+		if err != nil {
+			message := fmt.Sprintf("Error backing up resources: %v", err)
+			log.ApplicationBackupLog(backup).Errorf(message)
+			a.Recorder.Event(backup,
+				v1.EventTypeWarning,
+				string(stork_api.ApplicationBackupStatusFailed),
+				message)
 			return nil
 		}
 
-		var terminationChannels []chan bool
-		var err error
-
-		a.setDefaults(backup)
-		switch backup.Status.Stage {
-		case stork_api.ApplicationBackupStageInitial:
-			// Make sure the namespaces exist
-			for _, ns := range backup.Spec.Namespaces {
-				_, err := k8s.Instance().GetNamespace(ns)
-				if err != nil {
-					backup.Status.Status = stork_api.ApplicationBackupStatusFailed
-					backup.Status.Stage = stork_api.ApplicationBackupStageFinal
-					backup.Status.FinishTimestamp = metav1.Now()
-					err = fmt.Errorf("error getting namespace %v: %v", ns, err)
-					log.ApplicationBackupLog(backup).Errorf(err.Error())
-					a.Recorder.Event(backup,
-						v1.EventTypeWarning,
-						string(stork_api.ApplicationBackupStatusFailed),
-						err.Error())
-					err = sdk.Update(backup)
-					if err != nil {
-						log.ApplicationBackupLog(backup).Errorf("Error updating")
-					}
-					return nil
-				}
-			}
-			// Make sure the rules exist if configured
-			if backup.Spec.PreExecRule != "" {
-				_, err := k8s.Instance().GetRule(backup.Spec.PreExecRule, backup.Namespace)
-				if err != nil {
-					message := fmt.Sprintf("Error getting PreExecRule %v: %v", backup.Spec.PreExecRule, err)
-					log.ApplicationBackupLog(backup).Errorf(message)
-					a.Recorder.Event(backup,
-						v1.EventTypeWarning,
-						string(stork_api.ApplicationBackupStatusFailed),
-						message)
-					return nil
-				}
-			}
-			if backup.Spec.PostExecRule != "" {
-				_, err := k8s.Instance().GetRule(backup.Spec.PostExecRule, backup.Namespace)
-				if err != nil {
-					message := fmt.Sprintf("Error getting PostExecRule %v: %v", backup.Spec.PreExecRule, err)
-					log.ApplicationBackupLog(backup).Errorf(message)
-					a.Recorder.Event(backup,
-						v1.EventTypeWarning,
-						string(stork_api.ApplicationBackupStatusFailed),
-						message)
-					return nil
-				}
-			}
-			fallthrough
-		case stork_api.ApplicationBackupStagePreExecRule:
-			terminationChannels, err = a.runPreExecRule(backup)
-			if err != nil {
-				message := fmt.Sprintf("Error running PreExecRule: %v", err)
-				log.ApplicationBackupLog(backup).Errorf(message)
-				a.Recorder.Event(backup,
-					v1.EventTypeWarning,
-					string(stork_api.ApplicationBackupStatusFailed),
-					message)
-				backup.Status.Stage = stork_api.ApplicationBackupStageInitial
-				backup.Status.Status = stork_api.ApplicationBackupStatusInitial
-				err := sdk.Update(backup)
-				if err != nil {
-					return err
-				}
-				return nil
-			}
-			fallthrough
-		case stork_api.ApplicationBackupStageVolumes:
-			err := a.backupVolumes(backup, terminationChannels)
-			if err != nil {
-				message := fmt.Sprintf("Error backing up volumes: %v", err)
-				log.ApplicationBackupLog(backup).Errorf(message)
-				a.Recorder.Event(backup,
-					v1.EventTypeWarning,
-					string(stork_api.ApplicationBackupStatusFailed),
-					message)
-				return nil
-			}
-		case stork_api.ApplicationBackupStageApplications:
-			err := a.backupResources(backup)
-			if err != nil {
-				message := fmt.Sprintf("Error backing up resources: %v", err)
-				log.ApplicationBackupLog(backup).Errorf(message)
-				a.Recorder.Event(backup,
-					v1.EventTypeWarning,
-					string(stork_api.ApplicationBackupStatusFailed),
-					message)
-				return nil
-			}
-
-		case stork_api.ApplicationBackupStageFinal:
-			// Do Nothing
-			return nil
-		default:
-			log.ApplicationBackupLog(backup).Errorf("Invalid stage for backup: %v", backup.Status.Stage)
-		}
+	case stork_api.ApplicationBackupStageFinal:
+		// Do Nothing
+		return nil
+	default:
+		log.ApplicationBackupLog(backup).Errorf("Invalid stage for backup: %v", backup.Status.Stage)
 	}
+
 	return nil
 }
 
@@ -317,7 +350,7 @@ func (a *ApplicationBackupController) backupVolumes(backup *stork_api.Applicatio
 					string(stork_api.ApplicationBackupStatusFailed),
 					message)
 				backup.Status.Status = stork_api.ApplicationBackupStatusFailed
-				err = sdk.Update(backup)
+				err = a.client.Update(context.TODO(), backup)
 				if err != nil {
 					return err
 				}
@@ -327,7 +360,7 @@ func (a *ApplicationBackupController) backupVolumes(backup *stork_api.Applicatio
 			backup.Status.Volumes = append(backup.Status.Volumes, volumeInfos...)
 		}
 		backup.Status.Status = stork_api.ApplicationBackupStatusInProgress
-		err := sdk.Update(backup)
+		err := a.client.Update(context.TODO(), backup)
 		if err != nil {
 			return err
 		}
@@ -352,7 +385,7 @@ func (a *ApplicationBackupController) backupVolumes(backup *stork_api.Applicatio
 				backup.Status.Stage = stork_api.ApplicationBackupStageFinal
 				backup.Status.FinishTimestamp = metav1.Now()
 				backup.Status.Status = stork_api.ApplicationBackupStatusFailed
-				err = sdk.Update(backup)
+				err = a.client.Update(context.TODO(), backup)
 				if err != nil {
 					return err
 				}
@@ -383,7 +416,7 @@ func (a *ApplicationBackupController) backupVolumes(backup *stork_api.Applicatio
 		}
 		backup.Status.Volumes = volumeInfos
 		// Store the new status
-		err = sdk.Update(backup)
+		err = a.client.Update(context.TODO(), backup)
 		if err != nil {
 			return err
 		}
@@ -423,7 +456,7 @@ func (a *ApplicationBackupController) backupVolumes(backup *stork_api.Applicatio
 		backup.Status.Stage = stork_api.ApplicationBackupStageApplications
 		backup.Status.Status = stork_api.ApplicationBackupStatusInProgress
 		// Update the current state and then move on to backing up resources
-		err := sdk.Update(backup)
+		err := a.client.Update(context.TODO(), backup)
 		if err != nil {
 			return err
 		}
@@ -439,7 +472,7 @@ func (a *ApplicationBackupController) backupVolumes(backup *stork_api.Applicatio
 		}
 	}
 
-	err := sdk.Update(backup)
+	err := a.client.Update(context.TODO(), backup)
 	if err != nil {
 		return err
 	}
@@ -450,7 +483,7 @@ func (a *ApplicationBackupController) runPreExecRule(backup *stork_api.Applicati
 	if backup.Spec.PreExecRule == "" {
 		backup.Status.Stage = stork_api.ApplicationBackupStageVolumes
 		backup.Status.Status = stork_api.ApplicationBackupStatusPending
-		err := sdk.Update(backup)
+		err := a.client.Update(context.TODO(), backup)
 		if err != nil {
 			return nil, err
 		}
@@ -460,7 +493,7 @@ func (a *ApplicationBackupController) runPreExecRule(backup *stork_api.Applicati
 	if backup.Status.Stage == stork_api.ApplicationBackupStageInitial {
 		backup.Status.Stage = stork_api.ApplicationBackupStagePreExecRule
 		backup.Status.Status = stork_api.ApplicationBackupStatusInProgress
-		err := sdk.Update(backup)
+		err := a.client.Update(context.TODO(), backup)
 		if err != nil {
 			return nil, err
 		}
@@ -671,7 +704,7 @@ func (a *ApplicationBackupController) backupResources(
 		resourceInfos = append(resourceInfos, resourceInfo)
 	}
 	backup.Status.Resources = resourceInfos
-	if err = sdk.Update(backup); err != nil {
+	if err = a.client.Update(context.TODO(), backup); err != nil {
 		return err
 	}
 
@@ -709,7 +742,7 @@ func (a *ApplicationBackupController) backupResources(
 		return err
 	}
 
-	if err = sdk.Update(backup); err != nil {
+	if err = a.client.Update(context.TODO(), backup); err != nil {
 		return err
 	}
 
@@ -771,10 +804,10 @@ func (a *ApplicationBackupController) deleteBackup(backup *stork_api.Application
 }
 
 func (a *ApplicationBackupController) createCRD() error {
-	resource := k8s.CustomResource{
+	resource := apiextensions.CustomResource{
 		Name:    stork_api.ApplicationBackupResourceName,
 		Plural:  stork_api.ApplicationBackupResourcePlural,
-		Group:   stork.GroupName,
+		Group:   stork_api.SchemeGroupVersion.Group,
 		Version: stork_api.SchemeGroupVersion.Version,
 		Scope:   apiextensionsv1beta1.NamespaceScoped,
 		Kind:    reflect.TypeOf(stork_api.ApplicationBackup{}).Name(),

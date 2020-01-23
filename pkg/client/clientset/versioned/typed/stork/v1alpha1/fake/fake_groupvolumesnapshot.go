@@ -34,9 +34,9 @@ type FakeGroupVolumeSnapshots struct {
 	ns   string
 }
 
-var groupvolumesnapshotsResource = schema.GroupVersionResource{Group: "stork", Version: "v1alpha1", Resource: "groupvolumesnapshots"}
+var groupvolumesnapshotsResource = schema.GroupVersionResource{Group: "stork.libopenstorage.org", Version: "v1alpha1", Resource: "groupvolumesnapshots"}
 
-var groupvolumesnapshotsKind = schema.GroupVersionKind{Group: "stork", Version: "v1alpha1", Kind: "GroupVolumeSnapshot"}
+var groupvolumesnapshotsKind = schema.GroupVersionKind{Group: "stork.libopenstorage.org", Version: "v1alpha1", Kind: "GroupVolumeSnapshot"}
 
 // Get takes name of the groupVolumeSnapshot, and returns the corresponding groupVolumeSnapshot object, and an error if there is any.
 func (c *FakeGroupVolumeSnapshots) Get(name string, options v1.GetOptions) (result *v1alpha1.GroupVolumeSnapshot, err error) {
@@ -119,7 +119,7 @@ func (c *FakeGroupVolumeSnapshots) DeleteCollection(options *v1.DeleteOptions, l
 // Patch applies the patch and returns the patched groupVolumeSnapshot.
 func (c *FakeGroupVolumeSnapshots) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1alpha1.GroupVolumeSnapshot, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(groupvolumesnapshotsResource, c.ns, name, data, subresources...), &v1alpha1.GroupVolumeSnapshot{})
+		Invokes(testing.NewPatchSubresourceAction(groupvolumesnapshotsResource, c.ns, name, pt, data, subresources...), &v1alpha1.GroupVolumeSnapshot{})
 
 	if obj == nil {
 		return nil, err

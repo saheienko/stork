@@ -3,7 +3,10 @@ package storkctl
 import (
 	"fmt"
 
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/apiextensions"
+	"github.com/portworx/sched-ops/k8s/core"
+	"github.com/portworx/sched-ops/k8s/externalstorage"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/spf13/pflag"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -79,7 +82,7 @@ func (f *factory) GetNamespace() string {
 func (f *factory) GetAllNamespaces() ([]string, error) {
 	allNamespaces := make([]string, 0)
 	if f.allNamespaces {
-		namespaces, err := k8s.Instance().ListNamespaces(nil)
+		namespaces, err := core.Instance().ListNamespaces(nil)
 		if err != nil {
 			return nil, err
 		}
@@ -111,7 +114,10 @@ func (f *factory) UpdateConfig() error {
 	if err != nil {
 		return err
 	}
-	k8s.Instance().SetConfig(config)
+	apiextensions.Instance().SetConfig(config)
+	core.Instance().SetConfig(config)
+	stork.Instance().SetConfig(config)
+	externalstorage.Instance().SetConfig(config)
 	return nil
 }
 

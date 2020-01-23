@@ -13,7 +13,7 @@ import (
 	"github.com/libopenstorage/stork/drivers/volume"
 	storklog "github.com/libopenstorage/stork/pkg/log"
 	restore "github.com/libopenstorage/stork/pkg/snapshot/controllers"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/core"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/record"
@@ -132,7 +132,7 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
 		if vol.PersistentVolumeClaim == nil {
 			continue
 		}
-		pvc, err := k8s.Instance().GetPersistentVolumeClaim(vol.PersistentVolumeClaim.ClaimName, pod.Namespace)
+		pvc, err := core.Instance().GetPersistentVolumeClaim(vol.PersistentVolumeClaim.ClaimName, pod.Namespace)
 		if err != nil {
 			msg := fmt.Sprintf("Unable to find PVC %s, err: %v", vol.Name, err)
 			storklog.PodLog(pod).Warnf(msg)

@@ -34,9 +34,9 @@ type FakeMigrationSchedules struct {
 	ns   string
 }
 
-var migrationschedulesResource = schema.GroupVersionResource{Group: "stork", Version: "v1alpha1", Resource: "migrationschedules"}
+var migrationschedulesResource = schema.GroupVersionResource{Group: "stork.libopenstorage.org", Version: "v1alpha1", Resource: "migrationschedules"}
 
-var migrationschedulesKind = schema.GroupVersionKind{Group: "stork", Version: "v1alpha1", Kind: "MigrationSchedule"}
+var migrationschedulesKind = schema.GroupVersionKind{Group: "stork.libopenstorage.org", Version: "v1alpha1", Kind: "MigrationSchedule"}
 
 // Get takes name of the migrationSchedule, and returns the corresponding migrationSchedule object, and an error if there is any.
 func (c *FakeMigrationSchedules) Get(name string, options v1.GetOptions) (result *v1alpha1.MigrationSchedule, err error) {
@@ -131,7 +131,7 @@ func (c *FakeMigrationSchedules) DeleteCollection(options *v1.DeleteOptions, lis
 // Patch applies the patch and returns the patched migrationSchedule.
 func (c *FakeMigrationSchedules) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1alpha1.MigrationSchedule, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(migrationschedulesResource, c.ns, name, data, subresources...), &v1alpha1.MigrationSchedule{})
+		Invokes(testing.NewPatchSubresourceAction(migrationschedulesResource, c.ns, name, pt, data, subresources...), &v1alpha1.MigrationSchedule{})
 
 	if obj == nil {
 		return nil, err
