@@ -10,10 +10,10 @@ import (
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
 	migration "github.com/libopenstorage/stork/pkg/migration/controllers"
 	ocpv1 "github.com/openshift/api/apps/v1"
-	"github.com/portworx/sched-ops/k8s"
 	"github.com/stretchr/testify/require"
 	appv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/kubernetes/pkg/apis/core/v1"
 )
 
 func TestGetMigrationsNoMigration(t *testing.T) {
@@ -45,7 +45,7 @@ func createMigrationAndVerify(
 	testCommon(t, cmdArgs, nil, expected, false)
 
 	// Make sure it was created correctly
-	migration, err := k8s.Instance().GetMigration(name, namespace)
+	migration, err := core.Instance().GetMigration(name, namespace)
 	require.NoError(t, err, "Error getting migration")
 	require.Equal(t, name, migration.Name, "Migration name mismatch")
 	require.Equal(t, namespace, migration.Namespace, "Migration namespace mismatch")
@@ -68,7 +68,7 @@ func TestGetMigrationsOneMigration(t *testing.T) {
 
 func TestGetMigrationsMultiple(t *testing.T) {
 	defer resetTest()
-	_, err := k8s.Instance().CreateNamespace("default", nil)
+	_, err := core.Instance().CreateNamespace("default", nil)
 	require.NoError(t, err, "Error creating default namespace")
 
 	createMigrationAndVerify(t, "getmigrationtest1", "default", "clusterpair1", []string{"namespace1"}, "", "")
@@ -91,7 +91,7 @@ func TestGetMigrationsMultiple(t *testing.T) {
 	cmdArgs = []string{"get", "migrations", "getmigrationtest1"}
 	testCommon(t, cmdArgs, nil, expected, false)
 
-	_, err = k8s.Instance().CreateNamespace("ns1", nil)
+	_, err = core.Instance().CreateNamespace("ns1", nil)
 	require.NoError(t, err, "Error creating ns1 namespace")
 	createMigrationAndVerify(t, "getmigrationtest21", "ns1", "clusterpair2", []string{"namespace1"}, "", "")
 	cmdArgs = []string{"get", "migrations", "--all-namespaces"}
@@ -117,7 +117,7 @@ func TestGetMigrationsWithClusterPair(t *testing.T) {
 func TestGetMigrationsWithStatusAndProgress(t *testing.T) {
 	defer resetTest()
 	createMigrationAndVerify(t, "getmigrationstatustest", "default", "clusterpair1", []string{"namespace1"}, "", "")
-	migration, err := k8s.Instance().GetMigration("getmigrationstatustest", "default")
+	migration, err := core.Instance().GetMigration("getmigrationstatustest", "default")
 	require.NoError(t, err, "Error getting migration")
 
 	// Update the status of the migration
@@ -126,7 +126,7 @@ func TestGetMigrationsWithStatusAndProgress(t *testing.T) {
 	migration.Status.Stage = storkv1.MigrationStageFinal
 	migration.Status.Status = storkv1.MigrationStatusSuccessful
 	migration.Status.Volumes = []*storkv1.MigrationVolumeInfo{}
-	_, err = k8s.Instance().UpdateMigration(migration)
+	_, err = core.Instance().UpdateMigration(migration)
 	require.NoError(t, err, "Error updating migration")
 
 	expected := "NAME                     CLUSTERPAIR    STAGE     STATUS       VOLUMES   RESOURCES   CREATED               ELAPSED\n" +
@@ -219,12 +219,12 @@ func TestExclueVolumesForMigrations(t *testing.T) {
 	name := "excludevolumestest"
 	namespace := "test"
 	createMigrationAndVerify(t, name, namespace, "clusterpair1", []string{"namespace1"}, "", "")
-	migration, err := k8s.Instance().GetMigration(name, namespace)
+	migration, err := core.Instance().GetMigration(name, namespace)
 	require.NoError(t, err, "Error getting migration")
 
 	include := false
 	migration.Spec.IncludeVolumes = &include
-	_, err = k8s.Instance().UpdateMigration(migration)
+	_, err = core.Instance().UpdateMigration(migration)
 	require.NoError(t, err, "Error updating migration")
 
 	expected := "NAME                 CLUSTERPAIR    STAGE     STATUS    VOLUMES   RESOURCES   CREATED   ELAPSED\n" +
@@ -239,12 +239,12 @@ func TestExclueResourcesForMigrations(t *testing.T) {
 	name := "excluderesourcstest"
 	namespace := "test"
 	createMigrationAndVerify(t, name, namespace, "clusterpair1", []string{"namespace1"}, "", "")
-	migration, err := k8s.Instance().GetMigration(name, namespace)
+	migration, err := core.Instance().GetMigration(name, namespace)
 	require.NoError(t, err, "Error getting migration")
 
 	include := false
 	migration.Spec.IncludeResources = &include
-	_, err = k8s.Instance().UpdateMigration(migration)
+	_, err = core.Instance().UpdateMigration(migration)
 	require.NoError(t, err, "Error updating migration")
 
 	expected := "NAME                  CLUSTERPAIR    STAGE     STATUS    VOLUMES   RESOURCES   CREATED   ELAPSED\n" +
@@ -256,7 +256,7 @@ func TestExclueResourcesForMigrations(t *testing.T) {
 
 func createMigratedDeployment(t *testing.T) {
 	replicas := int32(0)
-	_, err := k8s.Instance().CreateNamespace("dep", nil)
+	_, err := core.Instance().CreateNamespace("dep", nil)
 	require.NoError(t, err, "Error creating dep namespace")
 
 	deployment := &appv1.Deployment{
@@ -271,13 +271,13 @@ func createMigratedDeployment(t *testing.T) {
 			Replicas: &replicas,
 		},
 	}
-	_, err = k8s.Instance().CreateDeployment(deployment)
+	_, err = core.Instance().CreateDeployment(deployment)
 	require.NoError(t, err, "Error creating deployment")
 }
 
 func createMigratedStatefulSet(t *testing.T) {
 	replicas := int32(0)
-	_, err := k8s.Instance().CreateNamespace("sts", nil)
+	_, err := core.Instance().CreateNamespace("sts", nil)
 	require.NoError(t, err, "Error creating sts namespace")
 
 	statefulSet := &appv1.StatefulSet{
@@ -292,14 +292,14 @@ func createMigratedStatefulSet(t *testing.T) {
 			Replicas: &replicas,
 		},
 	}
-	_, err = k8s.Instance().CreateStatefulSet(statefulSet)
+	_, err = core.Instance().CreateStatefulSet(statefulSet)
 	require.NoError(t, err, "Error creating statefulset")
 
 }
 
 func createMigratedDeploymentConfig(t *testing.T) {
 	replicas := int32(0)
-	_, err := k8s.Instance().CreateNamespace("depconf", nil)
+	_, err := core.Instance().CreateNamespace("depconf", nil)
 	require.NoError(t, err, "Error creating dep namespace")
 
 	deploymentConfig := &ocpv1.DeploymentConfig{
@@ -314,7 +314,7 @@ func createMigratedDeploymentConfig(t *testing.T) {
 			Replicas: replicas,
 		},
 	}
-	_, err = k8s.Instance().CreateDeploymentConfig(deploymentConfig)
+	_, err = core.Instance().CreateDeploymentConfig(deploymentConfig)
 	require.NoError(t, err, "Error creating deploymentconfig")
 }
 
@@ -389,7 +389,7 @@ func TestCreateMigrationWaitFailed(t *testing.T) {
 
 func setMigrationStatus(name, namespace string, isFail bool, t *testing.T) {
 	time.Sleep(10 * time.Second)
-	migrResp, err := k8s.Instance().GetMigration(name, namespace)
+	migrResp, err := core.Instance().GetMigration(name, namespace)
 	require.NoError(t, err, "Error getting Migration details")
 	require.Equal(t, migrResp.Status.Status, storkv1.MigrationStatusInitial)
 	require.Equal(t, migrResp.Status.Stage, storkv1.MigrationStageInitial)
@@ -399,6 +399,6 @@ func setMigrationStatus(name, namespace string, isFail bool, t *testing.T) {
 		migrResp.Status.Status = storkv1.MigrationStatusFailed
 	}
 
-	_, err = k8s.Instance().UpdateMigration(migrResp)
+	_, err = core.Instance().UpdateMigration(migrResp)
 	require.NoError(t, err, "Error updating Migrations")
 }

@@ -34,9 +34,9 @@ type FakeApplicationRestores struct {
 	ns   string
 }
 
-var applicationrestoresResource = schema.GroupVersionResource{Group: "stork", Version: "v1alpha1", Resource: "applicationrestores"}
+var applicationrestoresResource = schema.GroupVersionResource{Group: "stork.libopenstorage.org", Version: "v1alpha1", Resource: "applicationrestores"}
 
-var applicationrestoresKind = schema.GroupVersionKind{Group: "stork", Version: "v1alpha1", Kind: "ApplicationRestore"}
+var applicationrestoresKind = schema.GroupVersionKind{Group: "stork.libopenstorage.org", Version: "v1alpha1", Kind: "ApplicationRestore"}
 
 // Get takes name of the applicationRestore, and returns the corresponding applicationRestore object, and an error if there is any.
 func (c *FakeApplicationRestores) Get(name string, options v1.GetOptions) (result *v1alpha1.ApplicationRestore, err error) {
@@ -131,7 +131,7 @@ func (c *FakeApplicationRestores) DeleteCollection(options *v1.DeleteOptions, li
 // Patch applies the patch and returns the patched applicationRestore.
 func (c *FakeApplicationRestores) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1alpha1.ApplicationRestore, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(applicationrestoresResource, c.ns, name, data, subresources...), &v1alpha1.ApplicationRestore{})
+		Invokes(testing.NewPatchSubresourceAction(applicationrestoresResource, c.ns, name, pt, data, subresources...), &v1alpha1.ApplicationRestore{})
 
 	if obj == nil {
 		return nil, err

@@ -8,9 +8,9 @@ import (
 
 	snapv1 "github.com/kubernetes-incubator/external-storage/snapshot/pkg/apis/crd/v1"
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/portworx/sched-ops/k8s"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/kubernetes/pkg/apis/core/v1"
 )
 
 func TestGetVolumeSnapshotsNoSnapshots(t *testing.T) {
@@ -51,9 +51,9 @@ snap1     persistentVolumeClaimName   Pending                         Local
 
 func TestGetVolumeSnapshotsMultipleSnapshots(t *testing.T) {
 	var snapshots snapv1.VolumeSnapshotList
-	_, err := k8s.Instance().CreateNamespace("test1", nil)
+	_, err := core.Instance().CreateNamespace("test1", nil)
 	require.NoError(t, err, "Error creating test1 namespace")
-	_, err = k8s.Instance().CreateNamespace("test2", nil)
+	_, err = core.Instance().CreateNamespace("test2", nil)
 	require.NoError(t, err, "Error creating test2 namespace")
 
 	cmdArgs := []string{"get", "volumesnapshots", "--all-namespaces"}
@@ -152,9 +152,9 @@ func TestGetVolumeSnapshotRestoreNoRestores(t *testing.T) {
 
 func TestGetVolumeSnapshotRestoreAllRestores(t *testing.T) {
 
-	_, err := k8s.Instance().CreateNamespace("ns", nil)
+	_, err := core.Instance().CreateNamespace("ns", nil)
 	require.NoError(t, err, "Error creating ns namespace")
-	_, err = k8s.Instance().CreateNamespace("default", nil)
+	_, err = core.Instance().CreateNamespace("default", nil)
 	require.NoError(t, err, "Error creating ns1 namespace")
 
 	cmdArgs := []string{"get", "volumesnapshotrestore", "--all-namespaces"}
@@ -229,7 +229,7 @@ func createSnapshotRestoreAndVerify(
 	testCommon(t, cmdArgs, nil, expected, false)
 
 	// Make sure it was created correctly
-	snapRestore, err := k8s.Instance().GetVolumeSnapshotRestore(name, namespace)
+	snapRestore, err := core.Instance().GetVolumeSnapshotRestore(name, namespace)
 	require.NoError(t, err, "Error getting volumesnapshotrestores")
 	require.Equal(t, name, snapRestore.Name, "VolumeSnapshotRestore name mismatch")
 	require.Equal(t, sourceName, snapRestore.Spec.SourceName, "VolumeSnapshotRestore sourceName mismatch")
@@ -245,6 +245,6 @@ func createSnapshotRestoreAndVerify(
 		}
 		snapRestore.Status.Volumes = append(snapRestore.Status.Volumes, vols)
 	}
-	_, err = k8s.Instance().UpdateVolumeSnapshotRestore(snapRestore)
+	_, err = core.Instance().UpdateVolumeSnapshotRestore(snapRestore)
 	require.NoError(t, err, "Error updating volumesnapshotrestores")
 }

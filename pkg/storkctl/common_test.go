@@ -12,15 +12,15 @@ import (
 	v1alpha1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
 	fakeclient "github.com/libopenstorage/stork/pkg/client/clientset/versioned/fake"
 	fakeocpclient "github.com/openshift/client-go/apps/clientset/versioned/fake"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/core"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
 	kubernetes "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest/fake"
-	"k8s.io/kubernetes/pkg/apis/core/v1"
+	v1 "k8s.io/kubernetes/pkg/apis/core/v1"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
 )
 
 var codec runtime.Codec
@@ -64,7 +64,7 @@ func resetTest() {
 	tf.Client = fakeRestClient
 	fakeKubeClient := kubernetes.NewSimpleClientset()
 
-	k8s.Instance().SetClient(fakeKubeClient, fakeRestClient, fakeStorkClient, nil, nil, fakeOCPClient, nil, nil)
+	core.Instance().SetClient(fakeKubeClient, fakeRestClient, fakeStorkClient, nil, nil, fakeOCPClient, nil, nil)
 }
 
 func testCommon(t *testing.T, cmdArgs []string, obj runtime.Object, expected string, errorExpected bool) {

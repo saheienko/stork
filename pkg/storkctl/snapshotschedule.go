@@ -7,10 +7,10 @@ import (
 
 	snapv1 "github.com/kubernetes-incubator/external-storage/snapshot/pkg/apis/crd/v1"
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/spf13/cobra"
-	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/printers"
 )
 
@@ -58,7 +58,7 @@ func newCreateSnapshotScheduleCommand(cmdFactory Factory, ioStreams genericcliop
 			}
 			snapshotSchedule.Name = snapshotScheduleName
 			snapshotSchedule.Namespace = cmdFactory.GetNamespace()
-			_, err := k8s.Instance().CreateSnapshotSchedule(snapshotSchedule)
+			_, err := stork.Instance().CreateSnapshotSchedule(snapshotSchedule)
 			if err != nil {
 				util.CheckErr(err)
 				return
@@ -96,7 +96,7 @@ func newGetSnapshotScheduleCommand(cmdFactory Factory, ioStreams genericclioptio
 				snapshotSchedules = new(storkv1.VolumeSnapshotScheduleList)
 				for _, snapshotScheduleName := range args {
 					for _, ns := range namespaces {
-						snapshotSchedule, err := k8s.Instance().GetSnapshotSchedule(snapshotScheduleName, ns)
+						snapshotSchedule, err := stork.Instance().GetSnapshotSchedule(snapshotScheduleName, ns)
 						if err != nil {
 							util.CheckErr(err)
 							return
@@ -107,7 +107,7 @@ func newGetSnapshotScheduleCommand(cmdFactory Factory, ioStreams genericclioptio
 			} else {
 				var tempVolumeSnapshotSchedules storkv1.VolumeSnapshotScheduleList
 				for _, ns := range namespaces {
-					snapshotSchedules, err = k8s.Instance().ListSnapshotSchedules(ns)
+					snapshotSchedules, err = stork.Instance().ListSnapshotSchedules(ns)
 					if err != nil {
 						util.CheckErr(err)
 						return
@@ -162,7 +162,7 @@ func newDeleteSnapshotScheduleCommand(cmdFactory Factory, ioStreams genericcliop
 				}
 				snapshotSchedules = args
 			} else {
-				snapshotScheduleList, err := k8s.Instance().ListSnapshotSchedules(cmdFactory.GetNamespace())
+				snapshotScheduleList, err := stork.Instance().ListSnapshotSchedules(cmdFactory.GetNamespace())
 				if err != nil {
 					util.CheckErr(err)
 					return
@@ -189,7 +189,7 @@ func newDeleteSnapshotScheduleCommand(cmdFactory Factory, ioStreams genericcliop
 
 func deleteSnapshotSchedules(snapshotSchedules []string, namespace string, ioStreams genericclioptions.IOStreams) {
 	for _, snapshotSchedule := range snapshotSchedules {
-		err := k8s.Instance().DeleteSnapshotSchedule(snapshotSchedule, namespace)
+		err := stork.Instance().DeleteSnapshotSchedule(snapshotSchedule, namespace)
 		if err != nil {
 			util.CheckErr(err)
 			return
@@ -204,7 +204,7 @@ func getSnapshotSchedules(args []string, namespace string) ([]*storkv1.VolumeSna
 	if len(args) == 0 {
 		return nil, fmt.Errorf("at least one argument needs to be provided for volumesnapshot schedule name")
 	}
-	snapshotSchedule, err := k8s.Instance().GetSnapshotSchedule(args[0], namespace)
+	snapshotSchedule, err := stork.Instance().GetSnapshotSchedule(args[0], namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +267,7 @@ func updateSnapshotSchedules(snapshotSchedules []*storkv1.VolumeSnapshotSchedule
 	}
 	for _, snapshotSchedule := range snapshotSchedules {
 		snapshotSchedule.Spec.Suspend = &suspend
-		_, err := k8s.Instance().UpdateSnapshotSchedule(snapshotSchedule)
+		_, err := stork.Instance().UpdateSnapshotSchedule(snapshotSchedule)
 		if err != nil {
 			util.CheckErr(err)
 			return

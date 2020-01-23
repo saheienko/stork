@@ -6,10 +6,10 @@ import (
 	"time"
 
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/spf13/cobra"
-	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/printers"
 )
 
@@ -49,7 +49,7 @@ func newCreateApplicationBackupScheduleCommand(cmdFactory Factory, ioStreams gen
 				return
 			}
 
-			_, err := k8s.Instance().GetSchedulePolicy(schedulePolicyName)
+			_, err := stork.Instance().GetSchedulePolicy(schedulePolicyName)
 			if err != nil {
 				util.CheckErr(fmt.Errorf("error getting schedulepolicy %v: %v", schedulePolicyName, err))
 				return
@@ -71,7 +71,7 @@ func newCreateApplicationBackupScheduleCommand(cmdFactory Factory, ioStreams gen
 			}
 			applicationBackupSchedule.Name = applicationBackupScheduleName
 			applicationBackupSchedule.Namespace = cmdFactory.GetNamespace()
-			_, err = k8s.Instance().CreateApplicationBackupSchedule(applicationBackupSchedule)
+			_, err = stork.Instance().CreateApplicationBackupSchedule(applicationBackupSchedule)
 			if err != nil {
 				util.CheckErr(err)
 				return
@@ -109,7 +109,7 @@ func newGetApplicationBackupScheduleCommand(cmdFactory Factory, ioStreams generi
 				applicationBackupSchedules = new(storkv1.ApplicationBackupScheduleList)
 				for _, applicationBackupScheduleName := range args {
 					for _, ns := range namespaces {
-						applicationBackupSchedule, err := k8s.Instance().GetApplicationBackupSchedule(applicationBackupScheduleName, ns)
+						applicationBackupSchedule, err := stork.Instance().GetApplicationBackupSchedule(applicationBackupScheduleName, ns)
 						if err != nil {
 							util.CheckErr(err)
 							return
@@ -120,7 +120,7 @@ func newGetApplicationBackupScheduleCommand(cmdFactory Factory, ioStreams generi
 			} else {
 				var tempApplicationBackupSchedules storkv1.ApplicationBackupScheduleList
 				for _, ns := range namespaces {
-					applicationBackupSchedules, err = k8s.Instance().ListApplicationBackupSchedules(ns)
+					applicationBackupSchedules, err = stork.Instance().ListApplicationBackupSchedules(ns)
 					if err != nil {
 						util.CheckErr(err)
 						return
@@ -175,7 +175,7 @@ func newDeleteApplicationBackupScheduleCommand(cmdFactory Factory, ioStreams gen
 				}
 				applicationBackupSchedules = args
 			} else {
-				applicationBackupScheduleList, err := k8s.Instance().ListApplicationBackupSchedules(cmdFactory.GetNamespace())
+				applicationBackupScheduleList, err := stork.Instance().ListApplicationBackupSchedules(cmdFactory.GetNamespace())
 				if err != nil {
 					util.CheckErr(err)
 					return
@@ -202,7 +202,7 @@ func newDeleteApplicationBackupScheduleCommand(cmdFactory Factory, ioStreams gen
 
 func deleteApplicationBackupSchedules(applicationBackupSchedules []string, namespace string, ioStreams genericclioptions.IOStreams) {
 	for _, applicationBackupSchedule := range applicationBackupSchedules {
-		err := k8s.Instance().DeleteApplicationBackupSchedule(applicationBackupSchedule, namespace)
+		err := stork.Instance().DeleteApplicationBackupSchedule(applicationBackupSchedule, namespace)
 		if err != nil {
 			util.CheckErr(err)
 			return
@@ -218,13 +218,13 @@ func getApplicationBackupSchedules(backupLocation string, args []string, namespa
 		if len(args) == 0 {
 			return nil, fmt.Errorf("at least one argument needs to be provided for applicationBackup schedule name if cluster pair isn't provided")
 		}
-		applicationBackupSchedule, err := k8s.Instance().GetApplicationBackupSchedule(args[0], namespace)
+		applicationBackupSchedule, err := stork.Instance().GetApplicationBackupSchedule(args[0], namespace)
 		if err != nil {
 			return nil, err
 		}
 		applicationBackupSchedules = append(applicationBackupSchedules, applicationBackupSchedule)
 	} else {
-		applicationBackupScheduleList, err := k8s.Instance().ListApplicationBackupSchedules(namespace)
+		applicationBackupScheduleList, err := stork.Instance().ListApplicationBackupSchedules(namespace)
 		if err != nil {
 			return nil, err
 		}
@@ -296,7 +296,7 @@ func updateApplicationBackupSchedules(applicationBackupSchedules []*storkv1.Appl
 	}
 	for _, applicationBackupSchedule := range applicationBackupSchedules {
 		applicationBackupSchedule.Spec.Suspend = &suspend
-		_, err := k8s.Instance().UpdateApplicationBackupSchedule(applicationBackupSchedule)
+		_, err := stork.Instance().UpdateApplicationBackupSchedule(applicationBackupSchedule)
 		if err != nil {
 			util.CheckErr(err)
 			return

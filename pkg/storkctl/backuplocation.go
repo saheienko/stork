@@ -5,10 +5,10 @@ import (
 	"io"
 
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/spf13/cobra"
-	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/printers"
 )
 
@@ -37,7 +37,7 @@ func newGetBackupLocationCommand(cmdFactory Factory, ioStreams genericclioptions
 
 				backupLocations = new(storkv1.BackupLocationList)
 				for _, name := range args {
-					bl, err := k8s.Instance().GetBackupLocation(name, cmdFactory.GetNamespace())
+					bl, err := stork.Instance().GetBackupLocation(name, cmdFactory.GetNamespace())
 					if err == nil {
 						backupLocations.Items = append(backupLocations.Items, *bl)
 					} else {
@@ -54,7 +54,7 @@ func newGetBackupLocationCommand(cmdFactory Factory, ioStreams genericclioptions
 
 				var tempBackupLocations storkv1.BackupLocationList
 				for _, ns := range namespaces {
-					backupLocations, err := k8s.Instance().ListBackupLocations(ns)
+					backupLocations, err := stork.Instance().ListBackupLocations(ns)
 					if err != nil {
 						util.CheckErr(err)
 						return

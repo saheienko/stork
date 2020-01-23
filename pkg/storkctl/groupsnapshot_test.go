@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/stretchr/testify/require"
 )
 
@@ -39,7 +39,7 @@ func TestGroupSnapshotWithStatus(t *testing.T) {
 
 	createGroupSnapshotAndVerify(t, name, namespace, selectors, "", "", nil, nil, 0)
 
-	groupSnap, err := k8s.Instance().GetGroupSnapshot(name, namespace)
+	groupSnap, err := stork.Instance().GetGroupSnapshot(name, namespace)
 	require.NoError(t, err, "failed to get group snapshot")
 	require.NotNil(t, groupSnap, "got nil group snapshot after get call")
 
@@ -60,7 +60,7 @@ func TestGroupSnapshotWithStatus(t *testing.T) {
 		},
 	}
 
-	_, err = k8s.Instance().UpdateGroupSnapshot(groupSnap)
+	_, err = stork.Instance().UpdateGroupSnapshot(groupSnap)
 	require.NoError(t, err, "failed to update group snapshot")
 
 	expected := fmt.Sprintf("NAME                     STATUS       STAGE     SNAPSHOTS   CREATED\n"+
@@ -106,7 +106,7 @@ func TestMultipleGroupSnapshots(t *testing.T) {
 	namespace := "default"
 	selectors := map[string]string{"app": "mysql"}
 
-	_, err := k8s.Instance().CreateNamespace(namespace, nil)
+	_, err := stork.Instance().CreateNamespace(namespace, nil)
 	require.NoError(t, err, "Error creating namespace")
 
 	createGroupSnapshotAndVerify(t, name1, namespace, selectors, "", "", nil, nil, 0)
@@ -124,7 +124,7 @@ func TestMultipleGroupSnapshots(t *testing.T) {
 
 	name3 := "test-group-snap-3"
 	customNamespace := "ns1"
-	_, err = k8s.Instance().CreateNamespace(customNamespace, nil)
+	_, err = stork.Instance().CreateNamespace(customNamespace, nil)
 	require.NoError(t, err, "Error creating namespace")
 
 	createGroupSnapshotAndVerify(t, name3, customNamespace, selectors, "", "", nil, nil, 0)
@@ -217,7 +217,7 @@ func createGroupSnapshotAndVerify(
 	testCommon(t, cmdArgs, nil, expected, false)
 
 	// Make sure it's created correctly
-	groupSnap, err := k8s.Instance().GetGroupSnapshot(name, namespace)
+	groupSnap, err := stork.Instance().GetGroupSnapshot(name, namespace)
 	require.NoError(t, err, "failed to get group snapshot")
 	require.NotNil(t, groupSnap, "got nil group snapshot after get call")
 

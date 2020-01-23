@@ -5,10 +5,6 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func init() {
-	SchemeBuilder.Register(&GroupVolumeSnapshot{}, &GroupVolumeSnapshotList{})
-}
-
 const (
 	// GroupVolumeSnapshotResourceName is name for "groupvolumesnapshot" resource
 	GroupVolumeSnapshotResourceName = "groupvolumesnapshot"

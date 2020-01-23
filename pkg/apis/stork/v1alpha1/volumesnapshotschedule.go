@@ -5,10 +5,6 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func init() {
-	SchemeBuilder.Register(&VolumeSnapshotSchedule{}, &VolumeSnapshotScheduleList{})
-}
-
 const (
 	// VolumeSnapshotScheduleResourceName is name for "volumesnapshotschedule" resource
 	VolumeSnapshotScheduleResourceName = "volumesnapshotschedule"

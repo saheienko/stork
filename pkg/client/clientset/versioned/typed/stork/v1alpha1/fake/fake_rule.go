@@ -34,9 +34,9 @@ type FakeRules struct {
 	ns   string
 }
 
-var rulesResource = schema.GroupVersionResource{Group: "stork", Version: "v1alpha1", Resource: "rules"}
+var rulesResource = schema.GroupVersionResource{Group: "stork.libopenstorage.org", Version: "v1alpha1", Resource: "rules"}
 
-var rulesKind = schema.GroupVersionKind{Group: "stork", Version: "v1alpha1", Kind: "Rule"}
+var rulesKind = schema.GroupVersionKind{Group: "stork.libopenstorage.org", Version: "v1alpha1", Kind: "Rule"}
 
 // Get takes name of the rule, and returns the corresponding rule object, and an error if there is any.
 func (c *FakeRules) Get(name string, options v1.GetOptions) (result *v1alpha1.Rule, err error) {
@@ -119,7 +119,7 @@ func (c *FakeRules) DeleteCollection(options *v1.DeleteOptions, listOptions v1.L
 // Patch applies the patch and returns the patched rule.
 func (c *FakeRules) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1alpha1.Rule, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(rulesResource, c.ns, name, data, subresources...), &v1alpha1.Rule{})
+		Invokes(testing.NewPatchSubresourceAction(rulesResource, c.ns, name, pt, data, subresources...), &v1alpha1.Rule{})
 
 	if obj == nil {
 		return nil, err

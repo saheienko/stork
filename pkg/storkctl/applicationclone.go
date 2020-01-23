@@ -8,11 +8,11 @@ import (
 	"time"
 
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/portworx/sched-ops/task"
 	"github.com/spf13/cobra"
-	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/printers"
 )
 
@@ -55,7 +55,7 @@ func newCreateApplicationCloneCommand(cmdFactory Factory, ioStreams genericcliop
 			}
 			applicationClone.Name = applicationCloneName
 			applicationClone.Namespace = cmdFactory.GetNamespace()
-			_, err := k8s.Instance().CreateApplicationClone(applicationClone)
+			_, err := stork.Instance().CreateApplicationClone(applicationClone)
 			if err != nil {
 				util.CheckErr(err)
 				return
@@ -102,7 +102,7 @@ func newGetApplicationCloneCommand(cmdFactory Factory, ioStreams genericclioptio
 				applicationClones = new(storkv1.ApplicationCloneList)
 				for _, applicationCloneName := range args {
 					for _, ns := range namespaces {
-						applicationClone, err := k8s.Instance().GetApplicationClone(applicationCloneName, ns)
+						applicationClone, err := stork.Instance().GetApplicationClone(applicationCloneName, ns)
 						if err != nil {
 							util.CheckErr(err)
 							return
@@ -113,7 +113,7 @@ func newGetApplicationCloneCommand(cmdFactory Factory, ioStreams genericclioptio
 			} else {
 				var tempApplicationClones storkv1.ApplicationCloneList
 				for _, ns := range namespaces {
-					applicationClones, err = k8s.Instance().ListApplicationClones(ns)
+					applicationClones, err = stork.Instance().ListApplicationClones(ns)
 					if err != nil {
 						util.CheckErr(err)
 						return
@@ -162,7 +162,7 @@ func newDeleteApplicationCloneCommand(cmdFactory Factory, ioStreams genericcliop
 
 func deleteApplicationClones(applicationClones []string, namespace string, ioStreams genericclioptions.IOStreams) {
 	for _, applicationClone := range applicationClones {
-		err := k8s.Instance().DeleteApplicationClone(applicationClone, namespace)
+		err := stork.Instance().DeleteApplicationClone(applicationClone, namespace)
 		if err != nil {
 			util.CheckErr(err)
 			return
@@ -230,7 +230,7 @@ func waitForApplicationClone(name, namespace string, ioStreams genericclioptions
 	heading := fmt.Sprintf("%s\t\t%-20s", stage, status)
 	printMsg(heading, ioStreams.Out)
 	t := func() (interface{}, bool, error) {
-		clone, err := k8s.Instance().GetApplicationClone(name, namespace)
+		clone, err := stork.Instance().GetApplicationClone(name, namespace)
 		if err != nil {
 			util.CheckErr(err)
 			return "", false, err

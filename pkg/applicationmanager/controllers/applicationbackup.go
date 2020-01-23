@@ -16,7 +16,9 @@ import (
 	"github.com/libopenstorage/stork/pkg/objectstore"
 	"github.com/libopenstorage/stork/pkg/resourcecollector"
 	"github.com/libopenstorage/stork/pkg/rule"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/apiextensions"
+	"github.com/portworx/sched-ops/k8s/core"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/sirupsen/logrus"
 	"gocloud.dev/gcerrors"
 	v1 "k8s.io/api/core/v1"
@@ -126,7 +128,7 @@ func setKind(snap *stork_api.ApplicationBackup) {
 // performRuleRecovery terminates potential background commands running pods for
 // all applicationBackup objects
 func (a *ApplicationBackupController) performRuleRecovery() error {
-	applicationBackups, err := k8s.Instance().ListApplicationBackups(v1.NamespaceAll)
+	applicationBackups, err := stork.Instance().ListApplicationBackups(v1.NamespaceAll)
 	if err != nil {
 		logrus.Errorf("Failed to list all application backups during rule recovery: %v", err)
 		return err
@@ -183,7 +185,7 @@ func (a *ApplicationBackupController) handle(ctx context.Context, backup *stork_
 	case stork_api.ApplicationBackupStageInitial:
 		// Make sure the namespaces exist
 		for _, ns := range backup.Spec.Namespaces {
-			_, err := k8s.Instance().GetNamespace(ns)
+			_, err := core.Instance().GetNamespace(ns)
 			if err != nil {
 				backup.Status.Status = stork_api.ApplicationBackupStatusFailed
 				backup.Status.Stage = stork_api.ApplicationBackupStageFinal
@@ -203,7 +205,7 @@ func (a *ApplicationBackupController) handle(ctx context.Context, backup *stork_
 		}
 		// Make sure the rules exist if configured
 		if backup.Spec.PreExecRule != "" {
-			_, err := k8s.Instance().GetRule(backup.Spec.PreExecRule, backup.Namespace)
+			_, err := stork.Instance().GetRule(backup.Spec.PreExecRule, backup.Namespace)
 			if err != nil {
 				message := fmt.Sprintf("Error getting PreExecRule %v: %v", backup.Spec.PreExecRule, err)
 				log.ApplicationBackupLog(backup).Errorf(message)
@@ -215,7 +217,7 @@ func (a *ApplicationBackupController) handle(ctx context.Context, backup *stork_
 			}
 		}
 		if backup.Spec.PostExecRule != "" {
-			_, err := k8s.Instance().GetRule(backup.Spec.PostExecRule, backup.Namespace)
+			_, err := stork.Instance().GetRule(backup.Spec.PostExecRule, backup.Namespace)
 			if err != nil {
 				message := fmt.Sprintf("Error getting PostExecRule %v: %v", backup.Spec.PreExecRule, err)
 				log.ApplicationBackupLog(backup).Errorf(message)
@@ -480,7 +482,7 @@ func (a *ApplicationBackupController) runPreExecRule(backup *stork_api.Applicati
 
 	terminationChannels := make([]chan bool, 0)
 	for _, ns := range backup.Spec.Namespaces {
-		r, err := k8s.Instance().GetRule(backup.Spec.PreExecRule, ns)
+		r, err := stork.Instance().GetRule(backup.Spec.PreExecRule, ns)
 		if err != nil {
 			for _, channel := range terminationChannels {
 				channel <- true
@@ -504,7 +506,7 @@ func (a *ApplicationBackupController) runPreExecRule(backup *stork_api.Applicati
 
 func (a *ApplicationBackupController) runPostExecRule(backup *stork_api.ApplicationBackup) error {
 	for _, ns := range backup.Spec.Namespaces {
-		r, err := k8s.Instance().GetRule(backup.Spec.PostExecRule, ns)
+		r, err := stork.Instance().GetRule(backup.Spec.PostExecRule, ns)
 		if err != nil {
 			return err
 		}
@@ -552,7 +554,7 @@ func (a *ApplicationBackupController) uploadObject(
 	objectName string,
 	data []byte,
 ) error {
-	backupLocation, err := k8s.Instance().GetBackupLocation(backup.Spec.BackupLocation, backup.Namespace)
+	backupLocation, err := stork.Instance().GetBackupLocation(backup.Spec.BackupLocation, backup.Namespace)
 	if err != nil {
 		return err
 	}
@@ -715,7 +717,7 @@ func (a *ApplicationBackupController) deleteBackup(backup *stork_api.Application
 		return err
 	}
 
-	backupLocation, err := k8s.Instance().GetBackupLocation(backup.Spec.BackupLocation, backup.Namespace)
+	backupLocation, err := stork.Instance().GetBackupLocation(backup.Spec.BackupLocation, backup.Namespace)
 	if err != nil {
 		// Can't do anything if the backup location is deleted
 		if errors.IsNotFound(err) {
@@ -743,7 +745,7 @@ func (a *ApplicationBackupController) deleteBackup(backup *stork_api.Application
 }
 
 func (a *ApplicationBackupController) createCRD() error {
-	resource := k8s.CustomResource{
+	resource := apiextensions.CustomResource{
 		Name:    stork_api.ApplicationBackupResourceName,
 		Plural:  stork_api.ApplicationBackupResourcePlural,
 		Group:   stork_api.SchemeGroupVersion.Group,
@@ -751,10 +753,10 @@ func (a *ApplicationBackupController) createCRD() error {
 		Scope:   apiextensionsv1beta1.NamespaceScoped,
 		Kind:    reflect.TypeOf(stork_api.ApplicationBackup{}).Name(),
 	}
-	err := k8s.Instance().CreateCRD(resource)
+	err := apiextensions.Instance().CreateCRD(resource)
 	if err != nil && !errors.IsAlreadyExists(err) {
 		return err
 	}
 
-	return k8s.Instance().ValidateCRD(resource, validateCRDTimeout, validateCRDInterval)
+	return apiextensions.Instance().ValidateCRD(resource, validateCRDTimeout, validateCRDInterval)
 }

@@ -31,6 +31,7 @@ import (
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/adal"
 	"github.com/Azure/go-autorest/autorest/azure"
+	"github.com/Azure/go-autorest/autorest/azure/cli"
 	"github.com/dimchansky/utfbom"
 	"golang.org/x/crypto/pkcs12"
 )
@@ -41,87 +42,115 @@ import (
 // 3. Username password
 // 4. MSI
 func NewAuthorizerFromEnvironment() (autorest.Authorizer, error) {
-	tenantID := os.Getenv("AZURE_TENANT_ID")
-	clientID := os.Getenv("AZURE_CLIENT_ID")
-	clientSecret := os.Getenv("AZURE_CLIENT_SECRET")
-	certificatePath := os.Getenv("AZURE_CERTIFICATE_PATH")
-	certificatePassword := os.Getenv("AZURE_CERTIFICATE_PASSWORD")
-	username := os.Getenv("AZURE_USERNAME")
-	password := os.Getenv("AZURE_PASSWORD")
-	envName := os.Getenv("AZURE_ENVIRONMENT")
-	resource := os.Getenv("AZURE_AD_RESOURCE")
+	settings, err := getAuthenticationSettings()
+	if err != nil {
+		return nil, err
+	}
 
-	var env azure.Environment
-	if envName == "" {
-		env = azure.PublicCloud
+	if settings.resource == "" {
+		settings.resource = settings.environment.ResourceManagerEndpoint
+	}
+
+	return settings.getAuthorizer()
+}
+
+// NewAuthorizerFromEnvironmentWithResource creates an Authorizer configured from environment variables in the order:
+// 1. Client credentials
+// 2. Client certificate
+// 3. Username password
+// 4. MSI
+func NewAuthorizerFromEnvironmentWithResource(resource string) (autorest.Authorizer, error) {
+	settings, err := getAuthenticationSettings()
+	if err != nil {
+		return nil, err
+	}
+	settings.resource = resource
+	return settings.getAuthorizer()
+}
+
+type settings struct {
+	tenantID            string
+	clientID            string
+	clientSecret        string
+	certificatePath     string
+	certificatePassword string
+	username            string
+	password            string
+	envName             string
+	resource            string
+	environment         azure.Environment
+}
+
+func getAuthenticationSettings() (s settings, err error) {
+	s = settings{
+		tenantID:            os.Getenv("AZURE_TENANT_ID"),
+		clientID:            os.Getenv("AZURE_CLIENT_ID"),
+		clientSecret:        os.Getenv("AZURE_CLIENT_SECRET"),
+		certificatePath:     os.Getenv("AZURE_CERTIFICATE_PATH"),
+		certificatePassword: os.Getenv("AZURE_CERTIFICATE_PASSWORD"),
+		username:            os.Getenv("AZURE_USERNAME"),
+		password:            os.Getenv("AZURE_PASSWORD"),
+		envName:             os.Getenv("AZURE_ENVIRONMENT"),
+		resource:            os.Getenv("AZURE_AD_RESOURCE"),
+	}
+
+	if s.envName == "" {
+		s.environment = azure.PublicCloud
 	} else {
-		var err error
-		env, err = azure.EnvironmentFromName(envName)
-		if err != nil {
-			return nil, err
-		}
+		s.environment, err = azure.EnvironmentFromName(s.envName)
 	}
+	return
+}
 
-	if resource == "" {
-		resource = env.ResourceManagerEndpoint
-	}
-
+func (settings settings) getAuthorizer() (autorest.Authorizer, error) {
 	//1.Client Credentials
-	if clientSecret != "" {
-		config := NewClientCredentialsConfig(clientID, clientSecret, tenantID)
-		config.AADEndpoint = env.ActiveDirectoryEndpoint
-		config.Resource = resource
+	if settings.clientSecret != "" {
+		config := NewClientCredentialsConfig(settings.clientID, settings.clientSecret, settings.tenantID)
+		config.AADEndpoint = settings.environment.ActiveDirectoryEndpoint
+		config.Resource = settings.resource
 		return config.Authorizer()
 	}
 
 	//2. Client Certificate
-	if certificatePath != "" {
-		config := NewClientCertificateConfig(certificatePath, certificatePassword, clientID, tenantID)
-		config.AADEndpoint = env.ActiveDirectoryEndpoint
-		config.Resource = resource
+	if settings.certificatePath != "" {
+		config := NewClientCertificateConfig(settings.certificatePath, settings.certificatePassword, settings.clientID, settings.tenantID)
+		config.AADEndpoint = settings.environment.ActiveDirectoryEndpoint
+		config.Resource = settings.resource
 		return config.Authorizer()
 	}
 
 	//3. Username Password
-	if username != "" && password != "" {
-		config := NewUsernamePasswordConfig(username, password, clientID, tenantID)
-		config.AADEndpoint = env.ActiveDirectoryEndpoint
-		config.Resource = resource
+	if settings.username != "" && settings.password != "" {
+		config := NewUsernamePasswordConfig(settings.username, settings.password, settings.clientID, settings.tenantID)
+		config.AADEndpoint = settings.environment.ActiveDirectoryEndpoint
+		config.Resource = settings.resource
 		return config.Authorizer()
 	}
 
 	// 4. MSI
 	config := NewMSIConfig()
-	config.Resource = resource
-	config.ClientID = clientID
+	config.Resource = settings.resource
+	config.ClientID = settings.clientID
 	return config.Authorizer()
 }
 
 // NewAuthorizerFromFile creates an Authorizer configured from a configuration file.
 func NewAuthorizerFromFile(baseURI string) (autorest.Authorizer, error) {
-	fileLocation := os.Getenv("AZURE_AUTH_LOCATION")
-	if fileLocation == "" {
-		return nil, errors.New("auth file not found. Environment variable AZURE_AUTH_LOCATION is not set")
-	}
-
-	contents, err := ioutil.ReadFile(fileLocation)
+	file, err := getAuthFile()
 	if err != nil {
 		return nil, err
 	}
 
-	// Auth file might be encoded
-	decoded, err := decode(contents)
+	resource, err := getResourceForToken(*file, baseURI)
 	if err != nil {
 		return nil, err
 	}
+	return NewAuthorizerFromFileWithResource(resource)
+}
 
-	file := file{}
-	err = json.Unmarshal(decoded, &file)
-	if err != nil {
-		return nil, err
-	}
-
-	resource, err := getResourceForToken(file, baseURI)
+// NewAuthorizerFromFileWithResource creates an Authorizer configured from a configuration file.
+func NewAuthorizerFromFileWithResource(resource string) (autorest.Authorizer, error) {
+	file, err := getAuthFile()
 	if err != nil {
 		return nil, err
 	}
@@ -137,6 +166,61 @@ func NewAuthorizerFromFile(baseURI string) (autorest.Authorizer, error) {
 	}
 
 	return autorest.NewBearerAuthorizer(spToken), nil
+}
+
+// NewAuthorizerFromCLI creates an Authorizer configured from Azure CLI 2.0 for local development scenarios.
+func NewAuthorizerFromCLI() (autorest.Authorizer, error) {
+	settings, err := getAuthenticationSettings()
+	if err != nil {
+		return nil, err
+	}
+
+	if settings.resource == "" {
+		settings.resource = settings.environment.ResourceManagerEndpoint
+	}
+
+	return NewAuthorizerFromCLIWithResource(settings.resource)
+}
+
+// NewAuthorizerFromCLIWithResource creates an Authorizer configured from Azure CLI 2.0 for local development scenarios.
+func NewAuthorizerFromCLIWithResource(resource string) (autorest.Authorizer, error) {
+	token, err := cli.GetTokenFromCLI(resource)
+	if err != nil {
+		return nil, err
+	}
+
+	adalToken, err := token.ToADALToken()
+	if err != nil {
+		return nil, err
+	}
+
+	return autorest.NewBearerAuthorizer(&adalToken), nil
+}
+
+func getAuthFile() (*file, error) {
+	fileLocation := os.Getenv("AZURE_AUTH_LOCATION")
+	if fileLocation == "" {
+		return nil, errors.New("environment variable AZURE_AUTH_LOCATION is not set")
+	}
+
+	contents, err := ioutil.ReadFile(fileLocation)
+	if err != nil {
+		return nil, err
+	}
+
+	// Auth file might be encoded
+	decoded, err := decode(contents)
+	if err != nil {
+		return nil, err
+	}
+
+	authFile := file{}
+	err = json.Unmarshal(decoded, &authFile)
+	if err != nil {
+		return nil, err
+	}
+
+	return &authFile, nil
 }
 
 // File represents the authentication file

@@ -34,9 +34,9 @@ type FakeVolumeSnapshotSchedules struct {
 	ns   string
 }
 
-var volumesnapshotschedulesResource = schema.GroupVersionResource{Group: "stork", Version: "v1alpha1", Resource: "volumesnapshotschedules"}
+var volumesnapshotschedulesResource = schema.GroupVersionResource{Group: "stork.libopenstorage.org", Version: "v1alpha1", Resource: "volumesnapshotschedules"}
 
-var volumesnapshotschedulesKind = schema.GroupVersionKind{Group: "stork", Version: "v1alpha1", Kind: "VolumeSnapshotSchedule"}
+var volumesnapshotschedulesKind = schema.GroupVersionKind{Group: "stork.libopenstorage.org", Version: "v1alpha1", Kind: "VolumeSnapshotSchedule"}
 
 // Get takes name of the volumeSnapshotSchedule, and returns the corresponding volumeSnapshotSchedule object, and an error if there is any.
 func (c *FakeVolumeSnapshotSchedules) Get(name string, options v1.GetOptions) (result *v1alpha1.VolumeSnapshotSchedule, err error) {
@@ -131,7 +131,7 @@ func (c *FakeVolumeSnapshotSchedules) DeleteCollection(options *v1.DeleteOptions
 // Patch applies the patch and returns the patched volumeSnapshotSchedule.
 func (c *FakeVolumeSnapshotSchedules) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1alpha1.VolumeSnapshotSchedule, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(volumesnapshotschedulesResource, c.ns, name, data, subresources...), &v1alpha1.VolumeSnapshotSchedule{})
+		Invokes(testing.NewPatchSubresourceAction(volumesnapshotschedulesResource, c.ns, name, pt, data, subresources...), &v1alpha1.VolumeSnapshotSchedule{})
 
 	if obj == nil {
 		return nil, err

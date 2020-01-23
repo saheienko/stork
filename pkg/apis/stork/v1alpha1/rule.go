@@ -4,10 +4,6 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func init() {
-	SchemeBuilder.Register(&Rule{}, &RuleList{})
-}
-
 const (
 	// RuleActionCommand is a command action
 	RuleActionCommand RuleActionType = "command"

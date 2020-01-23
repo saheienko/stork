@@ -8,7 +8,8 @@ import (
 
 	"github.com/libopenstorage/stork/drivers/volume"
 	stork_api "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/apiextensions"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
@@ -160,7 +161,7 @@ func (c *ClusterPairController) handle(ctx context.Context, clusterPair *stork_a
 }
 
 func getClusterPairSchedulerConfig(clusterPairName string, namespace string) (*restclient.Config, error) {
-	clusterPair, err := k8s.Instance().GetClusterPair(clusterPairName, namespace)
+	clusterPair, err := stork.Instance().GetClusterPair(clusterPairName, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("error getting clusterpair: %v", err)
 	}
@@ -173,7 +174,7 @@ func getClusterPairSchedulerConfig(clusterPairName string, namespace string) (*r
 }
 
 func getClusterPairStorageStatus(clusterPairName string, namespace string) (stork_api.ClusterPairStatusType, error) {
-	clusterPair, err := k8s.Instance().GetClusterPair(clusterPairName, namespace)
+	clusterPair, err := stork.Instance().GetClusterPair(clusterPairName, namespace)
 	if err != nil {
 		return stork_api.ClusterPairStatusInitial, fmt.Errorf("error getting clusterpair: %v", err)
 	}
@@ -181,7 +182,7 @@ func getClusterPairStorageStatus(clusterPairName string, namespace string) (stor
 }
 
 func getClusterPairSchedulerStatus(clusterPairName string, namespace string) (stork_api.ClusterPairStatusType, error) {
-	clusterPair, err := k8s.Instance().GetClusterPair(clusterPairName, namespace)
+	clusterPair, err := stork.Instance().GetClusterPair(clusterPairName, namespace)
 	if err != nil {
 		return stork_api.ClusterPairStatusInitial, fmt.Errorf("error getting clusterpair: %v", err)
 	}
@@ -189,7 +190,7 @@ func getClusterPairSchedulerStatus(clusterPairName string, namespace string) (st
 }
 
 func (c *ClusterPairController) createCRD() error {
-	resource := k8s.CustomResource{
+	resource := apiextensions.CustomResource{
 		Name:    stork_api.ClusterPairResourceName,
 		Plural:  stork_api.ClusterPairResourcePlural,
 		Group:   stork_api.SchemeGroupVersion.Group,
@@ -197,10 +198,10 @@ func (c *ClusterPairController) createCRD() error {
 		Scope:   apiextensionsv1beta1.NamespaceScoped,
 		Kind:    reflect.TypeOf(stork_api.ClusterPair{}).Name(),
 	}
-	err := k8s.Instance().CreateCRD(resource)
+	err := apiextensions.Instance().CreateCRD(resource)
 	if err != nil && !errors.IsAlreadyExists(err) {
 		return err
 	}
 
-	return k8s.Instance().ValidateCRD(resource, validateCRDTimeout, validateCRDInterval)
+	return apiextensions.Instance().ValidateCRD(resource, validateCRDTimeout, validateCRDInterval)
 }

@@ -34,28 +34,28 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/flowcontrol"
-	"k8s.io/kubernetes/pkg/cloudprovider"
+	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/kubernetes/pkg/cloudprovider/providers/azure/auth"
-	"k8s.io/kubernetes/pkg/controller"
 	kubeletapis "k8s.io/kubernetes/pkg/kubelet/apis"
 	"k8s.io/kubernetes/pkg/version"
 
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure"
-	"github.com/ghodss/yaml"
-	"github.com/golang/glog"
+	"k8s.io/klog"
+	"sigs.k8s.io/yaml"
 )
 
 const (
 	// CloudProviderName is the value used for the --cloud-provider flag
-	CloudProviderName            = "azure"
-	rateLimitQPSDefault          = 1.0
-	rateLimitBucketDefault       = 5
-	backoffRetriesDefault        = 6
-	backoffExponentDefault       = 1.5
-	backoffDurationDefault       = 5 // in seconds
-	backoffJitterDefault         = 1.0
-	maximumLoadBalancerRuleCount = 148 // According to Azure LB rule default limit
+	CloudProviderName      = "azure"
+	rateLimitQPSDefault    = 1.0
+	rateLimitBucketDefault = 5
+	backoffRetriesDefault  = 6
+	backoffExponentDefault = 1.5
+	backoffDurationDefault = 5 // in seconds
+	backoffJitterDefault   = 1.0
+	// According to https://docs.microsoft.com/en-us/azure/azure-subscription-service-limits#load-balancer.
+	maximumLoadBalancerRuleCount = 250
 
 	vmTypeVMSS     = "vmss"
 	vmTypeStandard = "standard"
@@ -70,6 +70,8 @@ const (
 var (
 	// Master nodes are not added to standard load balancer by default.
 	defaultExcludeMasterFromStandardLB = true
+	// Outbound SNAT is enabled by default.
+	defaultDisableOutboundSNAT = false
 )
 
 // Azure implements PVLabeler.
@@ -139,6 +141,9 @@ type Config struct {
 	// ExcludeMasterFromStandardLB excludes master nodes from standard load balancer.
 	// If not set, it will be default to true.
 	ExcludeMasterFromStandardLB *bool `json:"excludeMasterFromStandardLB" yaml:"excludeMasterFromStandardLB"`
+	// DisableOutboundSNAT disables the outbound SNAT for public load balancer rules.
+	// It should only be set when loadBalancerSku is standard. If not set, it will be default to false.
+	DisableOutboundSNAT *bool `json:"disableOutboundSNAT" yaml:"disableOutboundSNAT"`
 
 	// Maximum allowed LoadBalancer Rule Count is the limit enforced by Azure Load balancer
 	MaximumLoadBalancerRuleCount int `json:"maximumLoadBalancerRuleCount" yaml:"maximumLoadBalancerRuleCount"`
@@ -256,18 +261,29 @@ func NewCloud(configReader io.Reader) (cloudprovider.Interface, error) {
 			config.CloudProviderRateLimitQPSWrite,
 			config.CloudProviderRateLimitBucketWrite)
 
-		glog.V(2).Infof("Azure cloudprovider (read ops) using rate limit config: QPS=%g, bucket=%d",
+		klog.V(2).Infof("Azure cloudprovider (read ops) using rate limit config: QPS=%g, bucket=%d",
 			config.CloudProviderRateLimitQPS,
 			config.CloudProviderRateLimitBucket)
 
-		glog.V(2).Infof("Azure cloudprovider (write ops) using rate limit config: QPS=%g, bucket=%d",
+		klog.V(2).Infof("Azure cloudprovider (write ops) using rate limit config: QPS=%g, bucket=%d",
 			config.CloudProviderRateLimitQPSWrite,
 			config.CloudProviderRateLimitBucketWrite)
 	}
 
-	// Do not add master nodes to standard LB by default.
-	if config.ExcludeMasterFromStandardLB == nil {
-		config.ExcludeMasterFromStandardLB = &defaultExcludeMasterFromStandardLB
+	if strings.EqualFold(config.LoadBalancerSku, loadBalancerSkuStandard) {
+		// Do not add master nodes to standard LB by default.
+		if config.ExcludeMasterFromStandardLB == nil {
+			config.ExcludeMasterFromStandardLB = &defaultExcludeMasterFromStandardLB
+		}
+
+		// Enable outbound SNAT by default.
+		if config.DisableOutboundSNAT == nil {
+			config.DisableOutboundSNAT = &defaultDisableOutboundSNAT
+		}
+	} else {
+		if config.DisableOutboundSNAT != nil && *config.DisableOutboundSNAT {
+			return nil, fmt.Errorf("disableOutboundSNAT should only set when loadBalancerSku is standard")
+		}
 	}
 
 	azClientConfig := &azClientConfig{
@@ -322,7 +338,7 @@ func NewCloud(configReader io.Reader) (cloudprovider.Interface, error) {
 			Duration: time.Duration(az.CloudProviderBackoffDuration) * time.Second,
 			Jitter:   az.CloudProviderBackoffJitter,
 		}
-		glog.V(2).Infof("Azure cloudprovider using try backoff: retries=%d, exponent=%f, duration=%d, jitter=%f",
+		klog.V(2).Infof("Azure cloudprovider using try backoff: retries=%d, exponent=%f, duration=%d, jitter=%f",
 			az.CloudProviderBackoffRetries,
 			az.CloudProviderBackoffExponent,
 			az.CloudProviderBackoffDuration,
@@ -394,7 +410,7 @@ func parseConfig(configReader io.Reader) (*Config, error) {
 }
 
 // Initialize passes a Kubernetes clientBuilder interface to the cloud provider
-func (az *Cloud) Initialize(clientBuilder controller.ControllerClientBuilder) {
+func (az *Cloud) Initialize(clientBuilder cloudprovider.ControllerClientBuilder, stop <-chan struct{}) {
 	az.kubeClient = clientBuilder.ClientOrDie("azure-cloud-provider")
 	az.eventBroadcaster = record.NewBroadcaster()
 	az.eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: az.kubeClient.CoreV1().Events("")})
@@ -457,22 +473,8 @@ func initDiskControllers(az *Cloud) error {
 		cloud:                 az,
 	}
 
-	// BlobDiskController: contains the function needed to
-	// create/attach/detach/delete blob based (unmanaged disks)
-	blobController, err := newBlobDiskController(common)
-	if err != nil {
-		return fmt.Errorf("AzureDisk -  failed to init Blob Disk Controller with error (%s)", err.Error())
-	}
-
-	// ManagedDiskController: contains the functions needed to
-	// create/attach/detach/delete managed disks
-	managedController, err := newManagedDiskController(common)
-	if err != nil {
-		return fmt.Errorf("AzureDisk -  failed to init Managed  Disk Controller with error (%s)", err.Error())
-	}
-
-	az.BlobDiskController = blobController
-	az.ManagedDiskController = managedController
+	az.BlobDiskController = &BlobDiskController{common: common}
+	az.ManagedDiskController = &ManagedDiskController{common: common}
 	az.controllerCommon = common
 
 	return nil
@@ -480,7 +482,7 @@ func initDiskControllers(az *Cloud) error {
 
 // SetInformers sets informers for Azure cloud provider.
 func (az *Cloud) SetInformers(informerFactory informers.SharedInformerFactory) {
-	glog.Infof("Setting up informers for Azure cloud provider")
+	klog.Infof("Setting up informers for Azure cloud provider")
 	nodeInformer := informerFactory.Core().V1().Nodes().Informer()
 	nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
@@ -503,12 +505,12 @@ func (az *Cloud) SetInformers(informerFactory informers.SharedInformerFactory) {
 			if !isNode {
 				deletedState, ok := obj.(cache.DeletedFinalStateUnknown)
 				if !ok {
-					glog.Errorf("Received unexpected object: %v", obj)
+					klog.Errorf("Received unexpected object: %v", obj)
 					return
 				}
 				node, ok = deletedState.Obj.(*v1.Node)
 				if !ok {
-					glog.Errorf("DeletedFinalStateUnknown contained non-Node object: %v", deletedState.Obj)
+					klog.Errorf("DeletedFinalStateUnknown contained non-Node object: %v", deletedState.Obj)
 					return
 				}
 			}

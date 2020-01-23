@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/portworx/sched-ops/k8s"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/kubernetes/pkg/apis/core/v1"
 )
 
 func createClusterPairAndVerify(t *testing.T, name string, namespace string) {
@@ -27,10 +27,10 @@ func createClusterPairAndVerify(t *testing.T, name string, namespace string) {
 		},
 	}
 
-	_, err := k8s.Instance().CreateClusterPair(clusterPair)
+	_, err := core.Instance().CreateClusterPair(clusterPair)
 	require.NoError(t, err, "Error creating Clusterpair")
 	// Make sure it was created correctly
-	clusterPair, err = k8s.Instance().GetClusterPair(name, namespace)
+	clusterPair, err = core.Instance().GetClusterPair(name, namespace)
 	require.NoError(t, err, "Error getting Clusterpair")
 	require.Equal(t, name, clusterPair.Name, "Clusterpair name mismatch")
 	require.Equal(t, namespace, clusterPair.Namespace, "Clusterpair namespace mismatch")
@@ -56,9 +56,9 @@ func TestGetClusterPairNotFound(t *testing.T) {
 func TestGetClusterPair(t *testing.T) {
 	defer resetTest()
 
-	_, err := k8s.Instance().CreateNamespace("test", nil)
+	_, err := core.Instance().CreateNamespace("test", nil)
 	require.NoError(t, err, "Error creating test namespace")
-	_, err = k8s.Instance().CreateNamespace("test1", nil)
+	_, err = core.Instance().CreateNamespace("test1", nil)
 	require.NoError(t, err, "Error creating test1 namespace")
 
 	createClusterPairAndVerify(t, "getclusterpairtest", "test")
@@ -97,12 +97,12 @@ func TestGetClusterPair(t *testing.T) {
 func TestGetClusterPairsWithStatus(t *testing.T) {
 	defer resetTest()
 	createClusterPairAndVerify(t, "clusterpairstatustest", "default")
-	clusterPair, err := k8s.Instance().GetClusterPair("clusterpairstatustest", "default")
+	clusterPair, err := core.Instance().GetClusterPair("clusterpairstatustest", "default")
 	require.NoError(t, err, "Error getting Clusterpair")
 	clusterPair.CreationTimestamp = metav1.Now()
 	clusterPair.Status.StorageStatus = storkv1.ClusterPairStatusReady
 	clusterPair.Status.SchedulerStatus = storkv1.ClusterPairStatusReady
-	_, err = k8s.Instance().UpdateClusterPair(clusterPair)
+	_, err = core.Instance().UpdateClusterPair(clusterPair)
 	require.NoError(t, err, "Error updating Clusterpair")
 	cmdArgs := []string{"get", "clusterpair", "clusterpairstatustest"}
 	expected := "NAME                    STORAGE-STATUS   SCHEDULER-STATUS   CREATED\n" +

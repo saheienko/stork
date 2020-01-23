@@ -10,13 +10,16 @@ import (
 
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
 	migration "github.com/libopenstorage/stork/pkg/migration/controllers"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/apps"
+	"github.com/portworx/sched-ops/k8s/core"
+	"github.com/portworx/sched-ops/k8s/openshift"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/portworx/sched-ops/task"
 	"github.com/spf13/cobra"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/printers"
 )
 
@@ -76,7 +79,7 @@ func newCreateMigrationCommand(cmdFactory Factory, ioStreams genericclioptions.I
 			}
 			migration.Name = migrationName
 			migration.Namespace = cmdFactory.GetNamespace()
-			_, err := k8s.Instance().CreateMigration(migration)
+			_, err := stork.Instance().CreateMigration(migration)
 			if err != nil {
 				util.CheckErr(err)
 				return
@@ -117,7 +120,7 @@ func newActivateMigrationsCommand(cmdFactory Factory, ioStreams genericclioption
 		Run: func(c *cobra.Command, args []string) {
 			activationNamespaces := make([]string, 0)
 			if allNamespaces {
-				namespaces, err := k8s.Instance().ListNamespaces(nil)
+				namespaces, err := core.Instance().ListNamespaces(nil)
 				if err != nil {
 					util.CheckErr(err)
 					return
@@ -153,7 +156,7 @@ func newDeactivateMigrationsCommand(cmdFactory Factory, ioStreams genericcliopti
 		Run: func(c *cobra.Command, args []string) {
 			deactivationNamespaces := make([]string, 0)
 			if allNamespaces {
-				namespaces, err := k8s.Instance().ListNamespaces(nil)
+				namespaces, err := core.Instance().ListNamespaces(nil)
 				if err != nil {
 					util.CheckErr(err)
 					return
@@ -180,7 +183,7 @@ func newDeactivateMigrationsCommand(cmdFactory Factory, ioStreams genericcliopti
 }
 
 func updateStatefulSets(namespace string, activate bool, ioStreams genericclioptions.IOStreams) {
-	statefulSets, err := k8s.Instance().ListStatefulSets(namespace)
+	statefulSets, err := apps.Instance().ListStatefulSets(namespace)
 	if err != nil {
 		util.CheckErr(err)
 		return
@@ -188,7 +191,7 @@ func updateStatefulSets(namespace string, activate bool, ioStreams genericcliopt
 	for _, statefulSet := range statefulSets.Items {
 		if replicas, update := getUpdatedReplicaCount(statefulSet.Annotations, activate, ioStreams); update {
 			statefulSet.Spec.Replicas = &replicas
-			_, err := k8s.Instance().UpdateStatefulSet(&statefulSet)
+			_, err := apps.Instance().UpdateStatefulSet(&statefulSet)
 			if err != nil {
 				printMsg(fmt.Sprintf("Error updating replicas for statefulset %v/%v : %v", statefulSet.Namespace, statefulSet.Name, err), ioStreams.ErrOut)
 				continue
@@ -200,7 +203,7 @@ func updateStatefulSets(namespace string, activate bool, ioStreams genericcliopt
 }
 
 func updateDeployments(namespace string, activate bool, ioStreams genericclioptions.IOStreams) {
-	deployments, err := k8s.Instance().ListDeployments(namespace, metav1.ListOptions{})
+	deployments, err := apps.Instance().ListDeployments(namespace, metav1.ListOptions{})
 	if err != nil {
 		util.CheckErr(err)
 		return
@@ -208,7 +211,7 @@ func updateDeployments(namespace string, activate bool, ioStreams genericcliopti
 	for _, deployment := range deployments.Items {
 		if replicas, update := getUpdatedReplicaCount(deployment.Annotations, activate, ioStreams); update {
 			deployment.Spec.Replicas = &replicas
-			_, err := k8s.Instance().UpdateDeployment(&deployment)
+			_, err := apps.Instance().UpdateDeployment(&deployment)
 			if err != nil {
 				printMsg(fmt.Sprintf("Error updating replicas for deployment %v/%v : %v", deployment.Namespace, deployment.Name, err), ioStreams.ErrOut)
 				continue
@@ -219,7 +222,7 @@ func updateDeployments(namespace string, activate bool, ioStreams genericcliopti
 }
 
 func updateDeploymentConfigs(namespace string, activate bool, ioStreams genericclioptions.IOStreams) {
-	deployments, err := k8s.Instance().ListDeploymentConfigs(namespace)
+	deployments, err := openshift.Instance().ListDeploymentConfigs(namespace)
 	if err != nil {
 		if !errors.IsNotFound(err) {
 			util.CheckErr(err)
@@ -229,7 +232,7 @@ func updateDeploymentConfigs(namespace string, activate bool, ioStreams genericc
 	for _, deployment := range deployments.Items {
 		if replicas, update := getUpdatedReplicaCount(deployment.Annotations, activate, ioStreams); update {
 			deployment.Spec.Replicas = replicas
-			_, err := k8s.Instance().UpdateDeploymentConfig(&deployment)
+			_, err := openshift.Instance().UpdateDeploymentConfig(&deployment)
 			if err != nil {
 				printMsg(fmt.Sprintf("Error updating replicas for deploymentconfig %v/%v : %v", deployment.Namespace, deployment.Name, err), ioStreams.ErrOut)
 				continue
@@ -277,7 +280,7 @@ func newGetMigrationCommand(cmdFactory Factory, ioStreams genericclioptions.IOSt
 				migrations = new(storkv1.MigrationList)
 				for _, migrationName := range args {
 					for _, ns := range namespaces {
-						migration, err := k8s.Instance().GetMigration(migrationName, ns)
+						migration, err := stork.Instance().GetMigration(migrationName, ns)
 						if err != nil {
 							util.CheckErr(err)
 							return
@@ -288,7 +291,7 @@ func newGetMigrationCommand(cmdFactory Factory, ioStreams genericclioptions.IOSt
 			} else {
 				var tempMigrations storkv1.MigrationList
 				for _, ns := range namespaces {
-					migrations, err = k8s.Instance().ListMigrations(ns)
+					migrations, err = stork.Instance().ListMigrations(ns)
 					if err != nil {
 						util.CheckErr(err)
 						return
@@ -343,7 +346,7 @@ func newDeleteMigrationCommand(cmdFactory Factory, ioStreams genericclioptions.I
 				}
 				migrations = args
 			} else {
-				migrationList, err := k8s.Instance().ListMigrations(cmdFactory.GetNamespace())
+				migrationList, err := stork.Instance().ListMigrations(cmdFactory.GetNamespace())
 				if err != nil {
 					util.CheckErr(err)
 					return
@@ -370,7 +373,7 @@ func newDeleteMigrationCommand(cmdFactory Factory, ioStreams genericclioptions.I
 
 func deleteMigrations(migrations []string, namespace string, ioStreams genericclioptions.IOStreams) {
 	for _, migration := range migrations {
-		err := k8s.Instance().DeleteMigration(migration, namespace)
+		err := stork.Instance().DeleteMigration(migration, namespace)
 		if err != nil {
 			util.CheckErr(err)
 			return
@@ -452,7 +455,7 @@ func waitForMigration(name, namespace string, ioStreams genericclioptions.IOStre
 	heading := fmt.Sprintf("%s\t\t%-20s", stage, status)
 	printMsg(heading, ioStreams.Out)
 	t := func() (interface{}, bool, error) {
-		migrResp, err := k8s.Instance().GetMigration(name, namespace)
+		migrResp, err := stork.Instance().GetMigration(name, namespace)
 		if err != nil {
 			util.CheckErr(err)
 			return "", false, err

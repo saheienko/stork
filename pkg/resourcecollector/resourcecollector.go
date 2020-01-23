@@ -2,13 +2,15 @@ package resourcecollector
 
 import (
 	"fmt"
+	"github.com/portworx/sched-ops/k8s/core"
+	"github.com/portworx/sched-ops/k8s/rbac"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/heptio/ark/pkg/discovery"
 	"github.com/libopenstorage/stork/drivers/volume"
-	"github.com/portworx/sched-ops/k8s"
 	"github.com/sirupsen/logrus"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
@@ -37,7 +39,9 @@ type ResourceCollector struct {
 	Driver           volume.Driver
 	discoveryHelper  discovery.Helper
 	dynamicInterface dynamic.Interface
-	k8sOps           k8s.Ops
+	stork            stork.Ops
+	core            core.Ops
+	rbac            rbac.Ops
 }
 
 // Init initializes the resource collector
@@ -67,7 +71,17 @@ func (r *ResourceCollector) Init(config *restclient.Config) error {
 	}
 
 	// reset k8s instance to given cluster config
-	r.k8sOps, err = k8s.NewInstanceFromRestConfig(config)
+	r.stork, err = stork.NewForConfig(config)
+	if err != nil {
+		return err
+	}
+
+	r.core, err = core.NewForConfig(config)
+	if err != nil {
+		return err
+	}
+
+	r.rbac, err = rbac.NewForConfig(config)
 	if err != nil {
 		return err
 	}
@@ -111,7 +125,7 @@ func (r *ResourceCollector) GetResources(namespaces []string, labelSelectors map
 	// Map to prevent collection of duplicate objects
 	resourceMap := make(map[types.UID]bool)
 
-	crbs, err := r.k8sOps.ListClusterRoleBindings()
+	crbs, err := r.rbac.ListClusterRoleBindings()
 	if err != nil {
 		return nil, err
 	}
@@ -361,7 +375,7 @@ func (r *ResourceCollector) ApplyResource(
 	if err != nil {
 		return err
 	}
-	_, err = dynamicClient.Create(object.(*unstructured.Unstructured))
+	_, err = dynamicClient.Create(object.(*unstructured.Unstructured), metav1.CreateOptions{})
 	if err != nil {
 		if apierrors.IsAlreadyExists(err) || strings.Contains(err.Error(), portallocator.ErrAllocated.Error()) {
 			if r.mergeSupportedForResource(object) {
@@ -374,7 +388,7 @@ func (r *ResourceCollector) ApplyResource(
 			} else {
 				return err
 			}
-			_, err = dynamicClient.Create(object.(*unstructured.Unstructured))
+			_, err = dynamicClient.Create(object.(*unstructured.Unstructured), metav1.CreateOptions{})
 			return err
 		}
 	}

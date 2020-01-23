@@ -6,55 +6,71 @@ required = [
   "k8s.io/code-generator/cmd/client-gen",
   "k8s.io/code-generator/cmd/lister-gen",
   "k8s.io/code-generator/cmd/informer-gen",
-  "k8s.io/code-generator/cmd/openapi-gen",
+  "k8s.io/kube-openapi/cmd/openapi-gen",
   "k8s.io/gengo/args",
+  "sigs.k8s.io/controller-tools/pkg/crd/generator",
 ]
 
 [[override]]
   name = "k8s.io/code-generator"
-  # revision for tag "kubernetes-1.12.3"
-  revision = "3dcf91f64f638563e5106f21f50c31fa361c918d"
+  # revision for tag "kubernetes-1.13.1"
+  revision = "c2090bec4d9b1fb25de3812f868accc2bc9ecbae"
 
 [[override]]
   name = "k8s.io/kubernetes"
-  #version = "=v1.12.3"
-  revision = "435f92c719f279a3a67808c80521ea17d5715c66"
-  #version = "=v1.14.6"
-  #revision = "96fac5cd13a5dc064f7d9f4f23030a6aeface6cc"
+  version = "=v1.13.6"
 
 [[override]]
   name = "k8s.io/api"
-  version = "kubernetes-1.12.3"
+  version = "kubernetes-1.13.6"
 
 [[override]]
   name = "k8s.io/apiextensions-apiserver"
-  version = "kubernetes-1.12.3"
+  version = "kubernetes-1.13.6"
 
 [[override]]
   name = "k8s.io/apimachinery"
-  version = "kubernetes-1.12.3"
+  version = "kubernetes-1.13.6"
 
 [[override]]
   name = "k8s.io/apiserver"
-  version = "kubernetes-1.12.3"
+  version = "kubernetes-1.13.6"
 
 [[override]]
   name = "k8s.io/cli-runtime"
-  version = "kubernetes-1.12.3"
+  version = "kubernetes-1.13.6"
 
 [[override]]
   name = "k8s.io/client-go"
-  version = "kubernetes-1.12.3"
+  version = "kubernetes-1.13.6"
 
 [[override]]
   name = "sigs.k8s.io/controller-runtime"
-  version = "=v0.1.8"
+  version = "=v0.1.10"
 
 [[override]]
   name = "github.com/operator-framework/operator-sdk"
-  # The version rule is used for a specific release and the master branch for in between releases.
-  # branch = "master" #osdk_branch_annotation
-  version = "=v0.10.0" #osdk_version_annotation
+  version = "=v0.10.1" 
+
+[[override]]
+  name = "k8s.io/kube-openapi"
+  revision = "0cf8f7e6ed1d2e3d47d02e3b6e559369af24d803"
+
+[[override]]
+  name = "github.com/go-openapi/spec"
+  branch = "master"
+
+[[override]]
+  name = "sigs.k8s.io/controller-tools"
+  revision = "9d55346c2bde73fb3326ac22eac2e5210a730207"
+
+[[override]]
+  name = "github.com/coreos/prometheus-operator"
+  version = "=v0.29.0"
+
+[[override]]
+  name = "k8s.io/kube-state-metrics"
+  version = "v1.6.0"
 
 [prune]
   go-tests = true
@@ -67,32 +83,24 @@ required = [
 ## temp once, for migration purpose
 
 [[override]]
-  name = "github.com/libopenstorage/autopilot-api"
-  source = "github.com/saheienko/autopilot-api"
-  branch = "update-operator-sdk"
-  #branch = "master"
-
-[[constraint]]
-  branch = "master"
-  name = "github.com/libopenstorage/stork"
+  name = "github.com/portworx/sched-ops"
+  source = "github.com/saheienko/sched-ops"
+  branch = "k8s-backward-compatibility"
 
 ## other packages
 
 [[override]]
   name = "github.com/kubernetes-incubator/external-storage"
-  source = "github.com/libopenstorage/external-storage"
-  #branch = "openstorage-5.2"
-  revision = "d5e6a33a172968d802e99c375ba1796287345eb2"
+  source = "github.com/saheienko/external-storage"
+  branch = "openstorage-5.5"
+
+[[override]]
+  name = "github.com/kubernetes-sigs/sig-storage-lib-external-provisioner" 
+  revision = "712c5819bca548e64c5fb29d2946c5d69126c3fa"
 
 [[override]]
   name = "github.com/libopenstorage/openstorage"
   branch = "release-7.0"
-
-[[override]]
-  name = "github.com/portworx/sched-ops"
-  source = "github.com/saheienko/sched-ops"
-  branch = "k8s-1.12-stork"
-  #revision = "bce671489f9f8c0fe7c288b4c04eaf7374feb18b"
 
 [[constraint]]
   branch = "master"
@@ -116,7 +124,7 @@ required = [
 
 [[override]]
   name = "github.com/Azure/go-autorest"
-  revision = "1ff28809256a84bb6966640ff3d0371af82ccba4"
+  revision = "ea233b6412b0421a65dc6160e16c893364664a95"
 
 [[override]]
   name = "github.com/russross/blackfriday"
@@ -130,7 +138,15 @@ required = [
   name = "gopkg.in/fsnotify.v1"
   source = "https://github.com/fsnotify/fsnotify.git"
 
-
 [[override]]
   name = "github.com/libopenstorage/secrets"
   branch = "master"
+
+[[override]]
+  name = "github.com/openshift/api"
+  revision = "d2f01e7b77a6fc78b328db20285423838419fef7"
+
+[[override]]
+  name = "github.com/openshift/client-go"
+  revision = "7cc0953bbbb7925e30232c056606d666942bb542"
+

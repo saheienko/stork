@@ -10,12 +10,12 @@ import (
 
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
 	"github.com/pborman/uuid"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/portworx/sched-ops/task"
 	"github.com/spf13/cobra"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/printers"
 )
 
@@ -41,7 +41,7 @@ func newActivateClusterDomainCommand(cmdFactory Factory, ioStreams genericcliopt
 		Run: func(c *cobra.Command, args []string) {
 			activationList := []string{}
 			if allClusterDomains {
-				cdsList, err := k8s.Instance().ListClusterDomainStatuses()
+				cdsList, err := stork.Instance().ListClusterDomainStatuses()
 				if err != nil {
 					util.CheckErr(err)
 					return
@@ -85,7 +85,7 @@ func newActivateClusterDomainCommand(cmdFactory Factory, ioStreams genericcliopt
 						Active:        true,
 					},
 				}
-				_, err := k8s.Instance().CreateClusterDomainUpdate(clusterDomainUpdate)
+				_, err := stork.Instance().CreateClusterDomainUpdate(clusterDomainUpdate)
 				if err != nil {
 					util.CheckErr(fmt.Errorf("failed to activate cluster domain %v: %v", clusterDomainName, err))
 					return
@@ -137,7 +137,7 @@ func newDeactivateClusterDomainCommand(cmdFactory Factory, ioStreams genericclio
 						Active:        false,
 					},
 				}
-				_, err := k8s.Instance().CreateClusterDomainUpdate(clusterDomainUpdate)
+				_, err := stork.Instance().CreateClusterDomainUpdate(clusterDomainUpdate)
 				if err != nil {
 					util.CheckErr(fmt.Errorf("failed to deactivate cluster domain %v: %v", clusterDomainName, err))
 					return
@@ -177,7 +177,7 @@ func newGetClusterDomainUpdateCommand(cmdFactory Factory, ioStreams genericcliop
 			var err error
 			if len(args) > 0 {
 				for _, clusterID := range args {
-					cds, err := k8s.Instance().GetClusterDomainUpdate(clusterID)
+					cds, err := stork.Instance().GetClusterDomainUpdate(clusterID)
 					if err != nil {
 						util.CheckErr(err)
 						return
@@ -185,7 +185,7 @@ func newGetClusterDomainUpdateCommand(cmdFactory Factory, ioStreams genericcliop
 					cdStatuses.Items = append(cdStatuses.Items, *cds)
 				}
 			} else {
-				cdStatuses, err = k8s.Instance().ListClusterDomainUpdates()
+				cdStatuses, err = stork.Instance().ListClusterDomainUpdates()
 				if err != nil {
 					util.CheckErr(err)
 					return
@@ -243,7 +243,7 @@ func waitForDomainUpdate(name string) string {
 	log.SetFlags(0)
 	log.SetOutput(ioutil.Discard)
 	t := func() (interface{}, bool, error) {
-		cds, err := k8s.Instance().GetClusterDomainUpdate(name)
+		cds, err := stork.Instance().GetClusterDomainUpdate(name)
 		if err != nil {
 			return fmt.Sprintf("Unable to retrive cluster details %v", err), false, err
 		}

@@ -4,10 +4,6 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func init() {
-	SchemeBuilder.Register(&ApplicationBackupSchedule{}, &ApplicationBackupSchedule{})
-}
-
 const (
 	// ApplicationBackupScheduleResourceName is name for "applicationbackupschedule" resource
 	ApplicationBackupScheduleResourceName = "applicationbackupschedule"

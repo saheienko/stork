@@ -13,7 +13,9 @@ import (
 	"github.com/libopenstorage/stork/pkg/log"
 	"github.com/libopenstorage/stork/pkg/objectstore"
 	"github.com/libopenstorage/stork/pkg/resourcecollector"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/apiextensions"
+	"github.com/portworx/sched-ops/k8s/core"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
@@ -90,7 +92,7 @@ func (a *ApplicationRestoreController) setDefaults(restore *stork_api.Applicatio
 	}
 	// If no namespaces mappings are provided add mappings for all of them
 	if len(restore.Spec.NamespaceMapping) == 0 {
-		backup, err := k8s.Instance().GetApplicationBackup(restore.Spec.BackupName, restore.Namespace)
+		backup, err := stork.Instance().GetApplicationBackup(restore.Spec.BackupName, restore.Namespace)
 		if err != nil {
 			return fmt.Errorf("error getting backup: %v", err)
 		}
@@ -113,10 +115,10 @@ func (a *ApplicationRestoreController) verifyNamespaces(restore *stork_api.Appli
 	}
 
 	for _, ns := range restore.Spec.NamespaceMapping {
-		if _, err := k8s.Instance().GetNamespace(ns); err != nil {
+		if _, err := core.Instance().GetNamespace(ns); err != nil {
 
 			if errors.IsNotFound(err) {
-				if _, err := k8s.Instance().CreateNamespace(ns, nil); err != nil {
+				if _, err := core.Instance().CreateNamespace(ns, nil); err != nil {
 					return err
 				}
 			}
@@ -330,7 +332,7 @@ func (a *ApplicationRestoreController) downloadObject(
 	namespace string,
 	objectName string,
 ) ([]byte, error) {
-	restoreLocation, err := k8s.Instance().GetBackupLocation(backup.Spec.BackupLocation, namespace)
+	restoreLocation, err := stork.Instance().GetBackupLocation(backup.Spec.BackupLocation, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -530,7 +532,7 @@ func (a *ApplicationRestoreController) applyResources(
 func (a *ApplicationRestoreController) restoreResources(
 	restore *stork_api.ApplicationRestore,
 ) error {
-	backup, err := k8s.Instance().GetApplicationBackup(restore.Spec.BackupName, restore.Namespace)
+	backup, err := stork.Instance().GetApplicationBackup(restore.Spec.BackupName, restore.Namespace)
 	if err != nil {
 		log.ApplicationRestoreLog(restore).Errorf("Error getting backup: %v", err)
 		return err
@@ -564,7 +566,7 @@ func (a *ApplicationRestoreController) restoreResources(
 }
 
 func (a *ApplicationRestoreController) createCRD() error {
-	resource := k8s.CustomResource{
+	resource := apiextensions.CustomResource{
 		Name:    stork_api.ApplicationRestoreResourceName,
 		Plural:  stork_api.ApplicationRestoreResourcePlural,
 		Group:   stork_api.SchemeGroupVersion.Group,
@@ -572,10 +574,10 @@ func (a *ApplicationRestoreController) createCRD() error {
 		Scope:   apiextensionsv1beta1.NamespaceScoped,
 		Kind:    reflect.TypeOf(stork_api.ApplicationRestore{}).Name(),
 	}
-	err := k8s.Instance().CreateCRD(resource)
+	err := apiextensions.Instance().CreateCRD(resource)
 	if err != nil && !errors.IsAlreadyExists(err) {
 		return err
 	}
 
-	return k8s.Instance().ValidateCRD(resource, validateCRDTimeout, validateCRDInterval)
+	return apiextensions.Instance().ValidateCRD(resource, validateCRDTimeout, validateCRDInterval)
 }

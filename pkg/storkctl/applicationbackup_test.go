@@ -8,7 +8,7 @@ import (
 	"time"
 
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -42,7 +42,7 @@ func createApplicationBackupAndVerify(
 	testCommon(t, cmdArgs, nil, expected, false)
 
 	// Make sure it was created correctly
-	backup, err := k8s.Instance().GetApplicationBackup(name, namespace)
+	backup, err := stork.Instance().GetApplicationBackup(name, namespace)
 	require.NoError(t, err, "Error getting backup")
 	require.Equal(t, name, backup.Name, "ApplicationBackup name mismatch")
 	require.Equal(t, namespace, backup.Namespace, "ApplicationBackup namespace mismatch")
@@ -65,7 +65,7 @@ func TestGetApplicationBackupsOneApplicationBackup(t *testing.T) {
 
 func TestGetApplicationBackupsMultiple(t *testing.T) {
 	defer resetTest()
-	_, err := k8s.Instance().CreateNamespace("default", nil)
+	_, err := stork.Instance().CreateNamespace("default", nil)
 	require.NoError(t, err, "Error creating default namespace")
 
 	createApplicationBackupAndVerify(t, "getbackuptest1", "default", []string{"namespace1"}, "backuplocation", "", "")
@@ -88,7 +88,7 @@ func TestGetApplicationBackupsMultiple(t *testing.T) {
 	cmdArgs = []string{"get", "backups", "getbackuptest1"}
 	testCommon(t, cmdArgs, nil, expected, false)
 
-	_, err = k8s.Instance().CreateNamespace("ns1", nil)
+	_, err = stork.Instance().CreateNamespace("ns1", nil)
 	require.NoError(t, err, "Error creating ns1 namespace")
 	createApplicationBackupAndVerify(t, "getbackuptest21", "ns1", []string{"namespace1"}, "backuplocation", "", "")
 	cmdArgs = []string{"get", "backups", "--all-namespaces"}
@@ -102,7 +102,7 @@ func TestGetApplicationBackupsMultiple(t *testing.T) {
 func TestGetApplicationBackupsWithStatusAndProgress(t *testing.T) {
 	defer resetTest()
 	createApplicationBackupAndVerify(t, "getbackupstatustest", "default", []string{"namespace1"}, "backuplocation", "", "")
-	backup, err := k8s.Instance().GetApplicationBackup("getbackupstatustest", "default")
+	backup, err := stork.Instance().GetApplicationBackup("getbackupstatustest", "default")
 	require.NoError(t, err, "Error getting backup")
 
 	// Update the status of the backup
@@ -112,7 +112,7 @@ func TestGetApplicationBackupsWithStatusAndProgress(t *testing.T) {
 	backup.Status.Stage = storkv1.ApplicationBackupStageFinal
 	backup.Status.Status = storkv1.ApplicationBackupStatusSuccessful
 	backup.Status.Volumes = []*storkv1.ApplicationBackupVolumeInfo{}
-	_, err = k8s.Instance().UpdateApplicationBackup(backup)
+	_, err = stork.Instance().UpdateApplicationBackup(backup)
 	require.NoError(t, err, "Error updating backup")
 
 	expected := "NAME                  STAGE     STATUS       VOLUMES   RESOURCES   CREATED               ELAPSED\n" +
@@ -217,7 +217,7 @@ func TestCreateApplicationBackupWaitFailed(t *testing.T) {
 
 func setApplicationBackupStatus(name, namespace string, isFail bool, t *testing.T) {
 	time.Sleep(10 * time.Second)
-	backup, err := k8s.Instance().GetApplicationBackup(name, namespace)
+	backup, err := stork.Instance().GetApplicationBackup(name, namespace)
 	require.NoError(t, err, "Error getting ApplicationBackup details")
 	require.Equal(t, backup.Status.Status, storkv1.ApplicationBackupStatusInitial)
 	require.Equal(t, backup.Status.Stage, storkv1.ApplicationBackupStageInitial)
@@ -227,6 +227,6 @@ func setApplicationBackupStatus(name, namespace string, isFail bool, t *testing.
 		backup.Status.Status = storkv1.ApplicationBackupStatusFailed
 	}
 
-	_, err = k8s.Instance().UpdateApplicationBackup(backup)
+	_, err = stork.Instance().UpdateApplicationBackup(backup)
 	require.NoError(t, err, "Error updating ApplicationBackups")
 }

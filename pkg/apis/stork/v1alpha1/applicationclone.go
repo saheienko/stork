@@ -4,10 +4,6 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func init() {
-	SchemeBuilder.Register(&ApplicationClone{}, &ApplicationCloneList{})
-}
-
 const (
 	// ApplicationCloneResourceName is the name for the application clone resource
 	ApplicationCloneResourceName = "applicationclone"

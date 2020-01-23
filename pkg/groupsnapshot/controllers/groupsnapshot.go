@@ -15,7 +15,10 @@ import (
 	"github.com/libopenstorage/stork/pkg/log"
 	"github.com/libopenstorage/stork/pkg/rule"
 	snapshotcontrollers "github.com/libopenstorage/stork/pkg/snapshot/controllers"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/apiextensions"
+	"github.com/portworx/sched-ops/k8s/core"
+	"github.com/portworx/sched-ops/k8s/externalstorage"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
@@ -219,7 +222,7 @@ func (m *GroupSnapshotController) handle(ctx context.Context, groupSnapshot *sto
 }
 
 func (m *GroupSnapshotController) createCRD() error {
-	resource := k8s.CustomResource{
+	resource := apiextensions.CustomResource{
 		Name:    stork_api.GroupVolumeSnapshotResourceName,
 		Plural:  stork_api.GroupVolumeSnapshotResourcePlural,
 		Group:   stork_api.SchemeGroupVersion.Group,
@@ -227,12 +230,12 @@ func (m *GroupSnapshotController) createCRD() error {
 		Scope:   apiextensionsv1beta1.NamespaceScoped,
 		Kind:    reflect.TypeOf(stork_api.GroupVolumeSnapshot{}).Name(),
 	}
-	err := k8s.Instance().CreateCRD(resource)
+	err := apiextensions.Instance().CreateCRD(resource)
 	if err != nil && !errors.IsAlreadyExists(err) {
 		return err
 	}
 
-	return k8s.Instance().ValidateCRD(resource, validateCRDTimeout, validateCRDInterval)
+	return apiextensions.Instance().ValidateCRD(resource, validateCRDTimeout, validateCRDInterval)
 }
 
 func (m *GroupSnapshotController) handleInitial(groupSnap *stork_api.GroupVolumeSnapshot) (bool, error) {
@@ -265,14 +268,14 @@ func (m *GroupSnapshotController) handleInitial(groupSnap *stork_api.GroupVolume
 		// Validate pre and post snap rules
 		preSnapRuleName := groupSnap.Spec.PreExecRule
 		if len(preSnapRuleName) > 0 {
-			if _, err := k8s.Instance().GetRule(preSnapRuleName, groupSnap.Namespace); err != nil {
+			if _, err := stork.Instance().GetRule(preSnapRuleName, groupSnap.Namespace); err != nil {
 				return !updateCRD, err
 			}
 		}
 
 		postSnapRuleName := groupSnap.Spec.PostExecRule
 		if len(postSnapRuleName) > 0 {
-			if _, err := k8s.Instance().GetRule(postSnapRuleName, groupSnap.Namespace); err != nil {
+			if _, err := stork.Instance().GetRule(postSnapRuleName, groupSnap.Namespace); err != nil {
 				return !updateCRD, err
 			}
 		}
@@ -302,7 +305,7 @@ func (m *GroupSnapshotController) handlePreSnap(groupSnap *stork_api.GroupVolume
 	}
 
 	log.GroupSnapshotLog(groupSnap).Infof("Running pre-snapshot rule: %s", ruleName)
-	r, err := k8s.Instance().GetRule(ruleName, groupSnap.Namespace)
+	r, err := stork.Instance().GetRule(ruleName, groupSnap.Namespace)
 	if err != nil {
 		return nil, !updateCRD, err
 	}
@@ -317,7 +320,7 @@ func (m *GroupSnapshotController) handlePreSnap(groupSnap *stork_api.GroupVolume
 	}
 
 	// refresh the latest groupSnap as ExecuteRule might have  updated it
-	groupSnap, err = k8s.Instance().GetGroupSnapshot(groupSnap.GetName(), groupSnap.GetNamespace())
+	groupSnap, err = stork.Instance().GetGroupSnapshot(groupSnap.GetName(), groupSnap.GetNamespace())
 	if err != nil {
 		return nil, !updateCRD, err
 	}
@@ -412,18 +415,18 @@ func (m *GroupSnapshotController) handleSnap(groupSnap *stork_api.GroupVolumeSna
 func (m *GroupSnapshotController) replaceSnapshotData(
 	snapData *crdv1.VolumeSnapshotData,
 ) error {
-	data, err := k8s.Instance().GetSnapshotData(snapData.Metadata.Name)
+	data, err := externalstorage.Instance().GetSnapshotData(snapData.Metadata.Name)
 	if err != nil {
 		return err
 	}
 
 	// If the existing one isn't the same as the new one delete and re-create it
 	if !reflect.DeepEqual(data.Spec, snapData.Spec) {
-		err := k8s.Instance().DeleteSnapshotData(snapData.Metadata.Name)
+		err := externalstorage.Instance().DeleteSnapshotData(snapData.Metadata.Name)
 		if err != nil {
 			return err
 		}
-		_, err = k8s.Instance().CreateSnapshotData(snapData)
+		_, err = externalstorage.Instance().CreateSnapshotData(snapData)
 		return err
 	}
 	return nil
@@ -432,18 +435,18 @@ func (m *GroupSnapshotController) replaceSnapshotData(
 func (m *GroupSnapshotController) replaceSnapshot(
 	snap *crdv1.VolumeSnapshot,
 ) error {
-	s, err := k8s.Instance().GetSnapshotData(snap.Metadata.Name)
+	s, err := externalstorage.Instance().GetSnapshotData(snap.Metadata.Name)
 	if err != nil {
 		return err
 	}
 
 	// If the existing one isn't the same as the new one delete and re-create it
 	if !reflect.DeepEqual(s.Spec, snap.Spec) {
-		err := k8s.Instance().DeleteSnapshotData(snap.Metadata.Name)
+		err := externalstorage.Instance().DeleteSnapshotData(snap.Metadata.Name)
 		if err != nil {
 			return err
 		}
-		_, err = k8s.Instance().CreateSnapshot(snap)
+		_, err = externalstorage.Instance().CreateSnapshot(snap)
 		return err
 	}
 	return nil
@@ -513,7 +516,7 @@ func (m *GroupSnapshotController) createSnapAndDataObjects(
 			},
 		}
 
-		_, err = k8s.Instance().CreateSnapshotData(snapData)
+		_, err = externalstorage.Instance().CreateSnapshotData(snapData)
 		if err != nil {
 			// Try to replace the snapshot data if it already exists
 			if errors.IsAlreadyExists(err) {
@@ -551,7 +554,7 @@ func (m *GroupSnapshotController) createSnapAndDataObjects(
 			},
 		}
 
-		snap, err = k8s.Instance().CreateSnapshot(snap)
+		snap, err = externalstorage.Instance().CreateSnapshot(snap)
 		if err != nil {
 			// Try to replace the snapshot if it already exists
 			if errors.IsAlreadyExists(err) {
@@ -560,7 +563,7 @@ func (m *GroupSnapshotController) createSnapAndDataObjects(
 
 			// For other errors and if replace fails revert snapdata
 			if err != nil {
-				deleteErr := k8s.Instance().DeleteSnapshotData(snapData.Metadata.Name)
+				deleteErr := externalstorage.Instance().DeleteSnapshotData(snapData.Metadata.Name)
 				if deleteErr != nil {
 					log.GroupSnapshotLog(groupSnap).Errorf("Failed to revert volumesnapshotdata due to: %v", deleteErr)
 				}
@@ -588,7 +591,7 @@ func revertSnapObjs(snapObjs []*crdv1.VolumeSnapshot) {
 
 	for _, snap := range snapObjs {
 		err := wait.ExponentialBackoff(snapDeleteBackoff, func() (bool, error) {
-			deleteErr := k8s.Instance().DeleteSnapshot(snap.Metadata.Name, snap.Metadata.Namespace)
+			deleteErr := externalstorage.Instance().DeleteSnapshot(snap.Metadata.Name, snap.Metadata.Namespace)
 			if deleteErr != nil {
 				log.SnapshotLog(snap).Infof("Failed to delete volumesnapshot due to: %v", deleteErr)
 				return false, nil
@@ -622,13 +625,13 @@ func (m *GroupSnapshotController) getPVCNameFromVolumeID(volID string) (string, 
 		return volID, nil
 	}
 
-	parentPV, err := k8s.Instance().GetPersistentVolume(volInfo.VolumeName)
+	parentPV, err := core.Instance().GetPersistentVolume(volInfo.VolumeName)
 	if err != nil {
 		logrus.Warnf("Parent PV: %s not found due to: %v", volInfo.VolumeName, err)
 		return volID, nil
 	}
 
-	pvc, err := k8s.Instance().GetPersistentVolumeClaim(parentPV.Spec.ClaimRef.Name, parentPV.Spec.ClaimRef.Namespace)
+	pvc, err := core.Instance().GetPersistentVolumeClaim(parentPV.Spec.ClaimRef.Name, parentPV.Spec.ClaimRef.Namespace)
 	if err != nil {
 		return volID, nil
 	}
@@ -649,7 +652,7 @@ func (m *GroupSnapshotController) handlePostSnap(groupSnap *stork_api.GroupVolum
 	}
 
 	logrus.Infof("Running post-snapshot rule: %s", ruleName)
-	r, err := k8s.Instance().GetRule(ruleName, groupSnap.Namespace)
+	r, err := stork.Instance().GetRule(ruleName, groupSnap.Namespace)
 	if err != nil {
 		return nil, !updateCRD, err
 	}
@@ -660,7 +663,7 @@ func (m *GroupSnapshotController) handlePostSnap(groupSnap *stork_api.GroupVolum
 	}
 
 	// refresh the latest groupSnap as ExecuteRule might have  updated it
-	groupSnap, err = k8s.Instance().GetGroupSnapshot(groupSnap.GetName(), groupSnap.GetNamespace())
+	groupSnap, err = stork.Instance().GetGroupSnapshot(groupSnap.GetName(), groupSnap.GetNamespace())
 	if err != nil {
 		return nil, !updateCRD, err
 	}
@@ -680,7 +683,7 @@ func (m *GroupSnapshotController) handleFinal(groupSnap *stork_api.GroupVolumeSn
 		currentRestoreNamespaces := ""
 		latestRestoreNamespacesInCSV := strings.Join(groupSnap.Spec.RestoreNamespaces, ",")
 
-		vsObject, err := k8s.Instance().GetSnapshot(childSnapshots[0].VolumeSnapshotName, groupSnap.GetNamespace())
+		vsObject, err := externalstorage.Instance().GetSnapshot(childSnapshots[0].VolumeSnapshotName, groupSnap.GetNamespace())
 		if err != nil {
 			return err
 		}
@@ -694,7 +697,7 @@ func (m *GroupSnapshotController) handleFinal(groupSnap *stork_api.GroupVolumeSn
 			log.GroupSnapshotLog(groupSnap).Infof("Updating restore namespaces for groupsnapshot to: %s",
 				latestRestoreNamespacesInCSV)
 			for _, childSnap := range childSnapshots {
-				vs, err := k8s.Instance().GetSnapshot(childSnap.VolumeSnapshotName, groupSnap.GetNamespace())
+				vs, err := externalstorage.Instance().GetSnapshot(childSnap.VolumeSnapshotName, groupSnap.GetNamespace())
 				if err != nil {
 					if errors.IsNotFound(err) {
 						continue
@@ -708,7 +711,7 @@ func (m *GroupSnapshotController) handleFinal(groupSnap *stork_api.GroupVolumeSn
 				}
 
 				vs.Metadata.Annotations[snapshotcontrollers.StorkSnapshotRestoreNamespacesAnnotation] = latestRestoreNamespacesInCSV
-				_, err = k8s.Instance().UpdateSnapshot(vs)
+				_, err = externalstorage.Instance().UpdateSnapshot(vs)
 				if err != nil {
 					return err
 				}

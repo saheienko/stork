@@ -5,10 +5,10 @@ import (
 	"io"
 
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/spf13/cobra"
-	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/printers"
 )
 
@@ -26,7 +26,7 @@ func newGetClusterDomainsStatusCommand(cmdFactory Factory, ioStreams genericclio
 			var err error
 			if len(args) > 0 {
 				for _, clusterID := range args {
-					cds, err := k8s.Instance().GetClusterDomainsStatus(clusterID)
+					cds, err := stork.Instance().GetClusterDomainsStatus(clusterID)
 					if err != nil {
 						util.CheckErr(err)
 						return
@@ -34,7 +34,7 @@ func newGetClusterDomainsStatusCommand(cmdFactory Factory, ioStreams genericclio
 					cdStatuses.Items = append(cdStatuses.Items, *cds)
 				}
 			} else {
-				cdStatuses, err = k8s.Instance().ListClusterDomainStatuses()
+				cdStatuses, err = stork.Instance().ListClusterDomainStatuses()
 				if err != nil {
 					util.CheckErr(err)
 					return

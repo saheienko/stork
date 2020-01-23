@@ -5,10 +5,10 @@ import (
 	"io"
 
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/spf13/cobra"
-	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/printers"
 )
 
@@ -29,7 +29,7 @@ func newGetSchedulePolicyCommand(cmdFactory Factory, ioStreams genericclioptions
 			if len(args) > 0 {
 				schedulePolicies = new(storkv1.SchedulePolicyList)
 				for _, policyName := range args {
-					policy, err := k8s.Instance().GetSchedulePolicy(policyName)
+					policy, err := stork.Instance().GetSchedulePolicy(policyName)
 					if err == nil {
 						schedulePolicies.Items = append(schedulePolicies.Items, *policy)
 					} else {
@@ -38,7 +38,7 @@ func newGetSchedulePolicyCommand(cmdFactory Factory, ioStreams genericclioptions
 					}
 				}
 			} else {
-				schedulePolicies, err = k8s.Instance().ListSchedulePolicies()
+				schedulePolicies, err = stork.Instance().ListSchedulePolicies()
 				if err != nil {
 					util.CheckErr(err)
 					return

@@ -8,12 +8,13 @@ import (
 	snapv1 "github.com/kubernetes-incubator/external-storage/snapshot/pkg/apis/crd/v1"
 	"github.com/libopenstorage/stork/drivers/volume"
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/externalstorage"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/spf13/cobra"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/printers"
 )
 
@@ -54,7 +55,7 @@ func newCreateSnapshotCommand(cmdFactory Factory, ioStreams genericclioptions.IO
 					PersistentVolumeClaimName: pvcName,
 				},
 			}
-			_, err := k8s.Instance().CreateSnapshot(snapshot)
+			_, err := externalstorage.Instance().CreateSnapshot(snapshot)
 			if err != nil {
 				util.CheckErr(err)
 				return
@@ -87,7 +88,7 @@ func newGetSnapshotCommand(cmdFactory Factory, ioStreams genericclioptions.IOStr
 				snapshots = new(snapv1.VolumeSnapshotList)
 				for _, snapName := range args {
 					for _, ns := range namespaces {
-						snapshot, err := k8s.Instance().GetSnapshot(snapName, ns)
+						snapshot, err := externalstorage.Instance().GetSnapshot(snapName, ns)
 						if err != nil {
 							util.CheckErr(err)
 							return
@@ -98,7 +99,7 @@ func newGetSnapshotCommand(cmdFactory Factory, ioStreams genericclioptions.IOStr
 			} else {
 				var tempSnapshots snapv1.VolumeSnapshotList
 				for _, ns := range namespaces {
-					snapshots, err = k8s.Instance().ListSnapshots(ns)
+					snapshots, err = externalstorage.Instance().ListSnapshots(ns)
 					if err != nil {
 						util.CheckErr(err)
 						return
@@ -154,7 +155,7 @@ func newDeleteSnapshotCommand(cmdFactory Factory, ioStreams genericclioptions.IO
 				}
 				snaps = args
 			} else {
-				snapshots, err := k8s.Instance().ListSnapshots(namespace)
+				snapshots, err := externalstorage.Instance().ListSnapshots(namespace)
 				if err != nil {
 					util.CheckErr(err)
 					return
@@ -181,7 +182,7 @@ func newDeleteSnapshotCommand(cmdFactory Factory, ioStreams genericclioptions.IO
 
 func deleteSnapshots(snaps []string, namespace string, ioStreams genericclioptions.IOStreams) {
 	for _, snap := range snaps {
-		err := k8s.Instance().DeleteSnapshot(snap, namespace)
+		err := externalstorage.Instance().DeleteSnapshot(snap, namespace)
 		if err != nil {
 			util.CheckErr(err)
 			return
@@ -250,7 +251,7 @@ func newCreateVolumeSnapshotRestoreCommand(cmdFactory Factory, ioStreams generic
 			}
 			snapRestore.Name = restoreCRDName
 			snapRestore.Namespace = cmdFactory.GetNamespace()
-			_, err := k8s.Instance().CreateVolumeSnapshotRestore(snapRestore)
+			_, err := stork.Instance().CreateVolumeSnapshotRestore(snapRestore)
 			if err != nil {
 				util.CheckErr(err)
 				return
@@ -285,7 +286,7 @@ func newGetVolumeSnapshotRestoreCommand(cmdFactory Factory, ioStreams genericcli
 				snapRestoreList = new(storkv1.VolumeSnapshotRestoreList)
 				for _, restoreName := range args {
 					for _, ns := range namespaces {
-						snapRestore, err := k8s.Instance().GetVolumeSnapshotRestore(restoreName, ns)
+						snapRestore, err := stork.Instance().GetVolumeSnapshotRestore(restoreName, ns)
 						if err != nil {
 							util.CheckErr(err)
 							return
@@ -296,7 +297,7 @@ func newGetVolumeSnapshotRestoreCommand(cmdFactory Factory, ioStreams genericcli
 			} else {
 				var tempRestoreList storkv1.VolumeSnapshotRestoreList
 				for _, ns := range namespaces {
-					snapRestoreList, err = k8s.Instance().ListVolumeSnapshotRestore(ns)
+					snapRestoreList, err = stork.Instance().ListVolumeSnapshotRestore(ns)
 					if err != nil {
 						util.CheckErr(err)
 						return
@@ -333,7 +334,7 @@ func newDeleteVolumeSnapshotRestoreCommand(cmdFactory Factory, ioStreams generic
 				return
 			}
 			name := args[0]
-			err := k8s.Instance().DeleteVolumeSnapshotRestore(name, cmdFactory.GetNamespace())
+			err := stork.Instance().DeleteVolumeSnapshotRestore(name, cmdFactory.GetNamespace())
 			if err != nil {
 				util.CheckErr(err)
 				return

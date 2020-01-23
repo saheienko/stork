@@ -33,9 +33,9 @@ type FakeClusterDomainUpdates struct {
 	Fake *FakeStorkV1alpha1
 }
 
-var clusterdomainupdatesResource = schema.GroupVersionResource{Group: "stork", Version: "v1alpha1", Resource: "clusterdomainupdates"}
+var clusterdomainupdatesResource = schema.GroupVersionResource{Group: "stork.libopenstorage.org", Version: "v1alpha1", Resource: "clusterdomainupdates"}
 
-var clusterdomainupdatesKind = schema.GroupVersionKind{Group: "stork", Version: "v1alpha1", Kind: "ClusterDomainUpdate"}
+var clusterdomainupdatesKind = schema.GroupVersionKind{Group: "stork.libopenstorage.org", Version: "v1alpha1", Kind: "ClusterDomainUpdate"}
 
 // Get takes name of the clusterDomainUpdate, and returns the corresponding clusterDomainUpdate object, and an error if there is any.
 func (c *FakeClusterDomainUpdates) Get(name string, options v1.GetOptions) (result *v1alpha1.ClusterDomainUpdate, err error) {
@@ -123,7 +123,7 @@ func (c *FakeClusterDomainUpdates) DeleteCollection(options *v1.DeleteOptions, l
 // Patch applies the patch and returns the patched clusterDomainUpdate.
 func (c *FakeClusterDomainUpdates) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1alpha1.ClusterDomainUpdate, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewRootPatchSubresourceAction(clusterdomainupdatesResource, name, data, subresources...), &v1alpha1.ClusterDomainUpdate{})
+		Invokes(testing.NewRootPatchSubresourceAction(clusterdomainupdatesResource, name, pt, data, subresources...), &v1alpha1.ClusterDomainUpdate{})
 	if obj == nil {
 		return nil, err
 	}

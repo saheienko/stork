@@ -9,7 +9,7 @@ import (
 	"time"
 
 	storkv1 "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/stork"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -47,7 +47,7 @@ func createApplicationBackupScheduleAndVerify(
 		cmdArgs = append(cmdArgs, "--postExecRule", postExecRule)
 	}
 
-	_, err := k8s.Instance().CreateSchedulePolicy(&storkv1.SchedulePolicy{
+	_, err := stork.Instance().CreateSchedulePolicy(&storkv1.SchedulePolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: schedulePolicyName,
 		},
@@ -62,7 +62,7 @@ func createApplicationBackupScheduleAndVerify(
 	testCommon(t, cmdArgs, nil, expected, false)
 
 	// Make sure it was created correctly
-	applicationbackup, err := k8s.Instance().GetApplicationBackupSchedule(name, namespace)
+	applicationbackup, err := stork.Instance().GetApplicationBackupSchedule(name, namespace)
 	require.NoError(t, err, "Error getting applicationbackup schedule")
 	require.Equal(t, name, applicationbackup.Name, "ApplicationBackupSchedule name mismatch")
 	require.Equal(t, namespace, applicationbackup.Namespace, "ApplicationBackupSchedule namespace mismatch")
@@ -108,9 +108,9 @@ func TestGetApplicationBackupSchedulesMultiple(t *testing.T) {
 
 func TestGetApplicationBackupSchedulesMultipleNamespaces(t *testing.T) {
 	defer resetTest()
-	_, err := k8s.Instance().CreateNamespace("test1", nil)
+	_, err := stork.Instance().CreateNamespace("test1", nil)
 	require.NoError(t, err, "Error creating test1 namespace")
-	_, err = k8s.Instance().CreateNamespace("test2", nil)
+	_, err = stork.Instance().CreateNamespace("test2", nil)
 	require.NoError(t, err, "Error creating test2 namespace")
 
 	createApplicationBackupScheduleAndVerify(t, "getapplicationbackupscheduletest1", "testpolicy", "test1", "backuplocation1", []string{"namespace1"}, "", "", true)
@@ -145,7 +145,7 @@ func TestGetApplicationBackupSchedulesWithBackupLocation(t *testing.T) {
 func TestGetApplicationBackupSchedulesWithStatus(t *testing.T) {
 	defer resetTest()
 	createApplicationBackupScheduleAndVerify(t, "getapplicationbackupschedulestatustest", "testpolicy", "default", "backuplocation1", []string{"namespace1"}, "", "", true)
-	applicationBackupSchedule, err := k8s.Instance().GetApplicationBackupSchedule("getapplicationbackupschedulestatustest", "default")
+	applicationBackupSchedule, err := stork.Instance().GetApplicationBackupSchedule("getapplicationbackupschedulestatustest", "default")
 	require.NoError(t, err, "Error getting applicationbackup schedule")
 
 	// Update the status of the daily applicationbackup
@@ -161,7 +161,7 @@ func TestGetApplicationBackupSchedulesWithStatus(t *testing.T) {
 			Status:            storkv1.ApplicationBackupStatusSuccessful,
 		},
 	)
-	applicationBackupSchedule, err = k8s.Instance().UpdateApplicationBackupSchedule(applicationBackupSchedule)
+	applicationBackupSchedule, err = stork.Instance().UpdateApplicationBackupSchedule(applicationBackupSchedule)
 	require.NoError(t, err, "Error updating applicationbackup schedule")
 
 	expected := "NAME                                     POLICY-NAME   BACKUP-LOCATION   SUSPEND   LAST-SUCCESS-TIME     LAST-SUCCESS-DURATION\n" +
@@ -179,7 +179,7 @@ func TestGetApplicationBackupSchedulesWithStatus(t *testing.T) {
 			Status:            storkv1.ApplicationBackupStatusSuccessful,
 		},
 	)
-	applicationBackupSchedule, err = k8s.Instance().UpdateApplicationBackupSchedule(applicationBackupSchedule)
+	applicationBackupSchedule, err = stork.Instance().UpdateApplicationBackupSchedule(applicationBackupSchedule)
 	require.NoError(t, err, "Error updating applicationbackup schedule")
 
 	expected = "NAME                                     POLICY-NAME   BACKUP-LOCATION   SUSPEND   LAST-SUCCESS-TIME     LAST-SUCCESS-DURATION\n" +
@@ -197,7 +197,7 @@ func TestGetApplicationBackupSchedulesWithStatus(t *testing.T) {
 			Status:            storkv1.ApplicationBackupStatusSuccessful,
 		},
 	)
-	_, err = k8s.Instance().UpdateApplicationBackupSchedule(applicationBackupSchedule)
+	_, err = stork.Instance().UpdateApplicationBackupSchedule(applicationBackupSchedule)
 	require.NoError(t, err, "Error updating applicationbackup schedule")
 
 	expected = "NAME                                     POLICY-NAME   BACKUP-LOCATION   SUSPEND   LAST-SUCCESS-TIME     LAST-SUCCESS-DURATION\n" +
@@ -295,7 +295,7 @@ func TestDefaultApplicationBackupSchedulePolicy(t *testing.T) {
 	testCommon(t, cmdArgs, nil, expected, true)
 
 	// Create again adding default policy
-	_, err := k8s.Instance().CreateSchedulePolicy(&storkv1.SchedulePolicy{
+	_, err := stork.Instance().CreateSchedulePolicy(&storkv1.SchedulePolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "default-applicationbackup-policy",
 		},
@@ -319,7 +319,7 @@ func TestSuspendResumeApplicationBackupSchedule(t *testing.T) {
 	expected := "ApplicationBackupSchedule " + name + " suspended successfully\n"
 	testCommon(t, cmdArgs, nil, expected, false)
 
-	applicationBackupSchedule, err := k8s.Instance().GetApplicationBackupSchedule(name, namespace)
+	applicationBackupSchedule, err := stork.Instance().GetApplicationBackupSchedule(name, namespace)
 	require.NoError(t, err, "Error getting applicationbackupschedule")
 	require.True(t, *applicationBackupSchedule.Spec.Suspend, "applicationbackup schedule not suspended")
 
@@ -327,7 +327,7 @@ func TestSuspendResumeApplicationBackupSchedule(t *testing.T) {
 	expected = "ApplicationBackupSchedule " + name + " resumed successfully\n"
 	testCommon(t, cmdArgs, nil, expected, false)
 
-	applicationBackupSchedule, err = k8s.Instance().GetApplicationBackupSchedule(name, namespace)
+	applicationBackupSchedule, err = stork.Instance().GetApplicationBackupSchedule(name, namespace)
 	require.NoError(t, err, "Error getting applicationbackupschedule")
 	require.False(t, *applicationBackupSchedule.Spec.Suspend, "applicationbackup schedule suspended")
 
@@ -335,7 +335,7 @@ func TestSuspendResumeApplicationBackupSchedule(t *testing.T) {
 	expected = "ApplicationBackupSchedule " + name + " suspended successfully\n"
 	testCommon(t, cmdArgs, nil, expected, false)
 
-	applicationBackupSchedule, err = k8s.Instance().GetApplicationBackupSchedule(name, namespace)
+	applicationBackupSchedule, err = stork.Instance().GetApplicationBackupSchedule(name, namespace)
 	require.NoError(t, err, "Error getting applicationbackupschedule")
 	require.True(t, *applicationBackupSchedule.Spec.Suspend, "applicationbackup schedule not suspended")
 
@@ -343,7 +343,7 @@ func TestSuspendResumeApplicationBackupSchedule(t *testing.T) {
 	expected = "ApplicationBackupSchedule " + name + " resumed successfully\n"
 	testCommon(t, cmdArgs, nil, expected, false)
 
-	applicationBackupSchedule, err = k8s.Instance().GetApplicationBackupSchedule(name, namespace)
+	applicationBackupSchedule, err = stork.Instance().GetApplicationBackupSchedule(name, namespace)
 	require.NoError(t, err, "Error getting applicationbackupschedule")
 	require.False(t, *applicationBackupSchedule.Spec.Suspend, "applicationbackup schedule suspended")
 
