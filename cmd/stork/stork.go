@@ -28,6 +28,7 @@ import (
 	"github.com/libopenstorage/stork/pkg/snapshot"
 	"github.com/libopenstorage/stork/pkg/version"
 	"github.com/libopenstorage/stork/pkg/webhookadmission"
+	kdmpapis "github.com/portworx/kdmp/pkg/apis"
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 	api_v1 "k8s.io/api/core/v1"
@@ -207,6 +208,9 @@ func run(c *cli.Context) {
 
 	// Setup scheme for all stork resources
 	if err := apis.AddToScheme(mgr.GetScheme()); err != nil {
+		log.Fatalf("Setup scheme failed for stork resources: %v", err)
+	}
+	if err := kdmpapis.AddToScheme(mgr.GetScheme()); err != nil {
 		log.Fatalf("Setup scheme failed for stork resources: %v", err)
 	}
 

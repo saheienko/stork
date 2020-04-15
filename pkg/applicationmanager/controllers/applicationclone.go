@@ -11,6 +11,7 @@ import (
 	"github.com/libopenstorage/stork/pkg/log"
 	"github.com/libopenstorage/stork/pkg/resourcecollector"
 	"github.com/libopenstorage/stork/pkg/rule"
+	"github.com/portworx/kdmp/pkg/apis/kdmp/v1alpha1"
 	"github.com/portworx/sched-ops/k8s/apiextensions"
 	"github.com/portworx/sched-ops/k8s/core"
 	storkops "github.com/portworx/sched-ops/k8s/stork"
@@ -21,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -32,6 +34,8 @@ import (
 
 const (
 	pvNamePrefix = "pvc-"
+
+	defaultStrokSnapshotStorageClass = "stork-snapshot-sc"
 )
 
 // NewApplicationClone create a new instance of ApplicationCloneController.
@@ -341,8 +345,17 @@ func (a *ApplicationCloneController) cloneVolumes(clone *stork_api.ApplicationCl
 	// Start clone of the volumes if it hasn't started yet
 	if clone.Status.Stage == stork_api.ApplicationCloneStageVolumes &&
 		clone.Status.Status == stork_api.ApplicationCloneStatusInProgress {
-		if err := a.volDriver.CreateVolumeClones(clone); err != nil {
-			return err
+		//if err := a.volDriver.CreateVolumeClones(clone); err != nil {
+		//	return err
+		//}
+
+		// TODO: cleanup dataexport resources
+		if err := a.clonePVCfor(clone); err != nil {
+			return fmt.Errorf("clone pvcs: %s", err)
+		}
+
+		if !isVolumesReady(clone) {
+			return nil
 		}
 
 		// Terminate any background rules that were started
@@ -495,17 +508,19 @@ func (a *ApplicationCloneController) prepareResources(
 			continue
 		}
 
-		metadata, err := meta.Accessor(o)
-		if err != nil {
-			return nil, err
-		}
-
 		switch o.GetObjectKind().GroupVersionKind().Kind {
-		case "PersistentVolume":
-			err := a.preparePVResource(o)
-			if err != nil {
-				return nil, fmt.Errorf("error preparing PV resource %v: %v", metadata.GetName(), err)
-			}
+		// PVC/PV objects have been created by dataExport
+		case "PersistentVolume", "PersistentVolumeClaim":
+			continue
+
+			//metadata, err := meta.Accessor(o)
+			//if err != nil {
+			//	return nil, err
+			//}
+			//err := a.preparePVResource(o)
+			//if err != nil {
+			//	return nil, fmt.Errorf("error preparing PV resource %v: %v", metadata.GetName(), err)
+			//}
 		}
 		err = a.resourceCollector.PrepareResourceForApply(
 			o,
@@ -519,27 +534,27 @@ func (a *ApplicationCloneController) prepareResources(
 	return tempObjects, nil
 }
 
-func (a *ApplicationCloneController) preparePVResource(
-	object runtime.Unstructured,
-) error {
-	var pv v1.PersistentVolume
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(object.UnstructuredContent(), &pv); err != nil {
-		return err
-	}
-
-	_, err := a.volDriver.UpdateMigratedPersistentVolumeSpec(&pv)
-	if err != nil {
-		return err
-	}
-
-	o, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&pv)
-	if err != nil {
-		return err
-	}
-	object.SetUnstructuredContent(o)
-
-	return err
-}
+//func (a *ApplicationCloneController) preparePVResource(
+//	object runtime.Unstructured,
+//) error {
+//	var pv v1.PersistentVolume
+//	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(object.UnstructuredContent(), &pv); err != nil {
+//		return err
+//	}
+//
+//	_, err := a.volDriver.UpdateMigratedPersistentVolumeSpec(&pv)
+//	if err != nil {
+//		return err
+//	}
+//
+//	o, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&pv)
+//	if err != nil {
+//		return err
+//	}
+//	object.SetUnstructuredContent(o)
+//
+//	return err
+//}
 
 func (a *ApplicationCloneController) getPVNameMappings(
 	clone *stork_api.ApplicationClone,
@@ -729,6 +744,80 @@ func (a *ApplicationCloneController) cloneResources(
 	return nil
 }
 
+func (a *ApplicationCloneController) clonePVCfor(clone *stork_api.ApplicationClone) error {
+	pvcList, err := core.Instance().GetPersistentVolumeClaims(clone.Spec.SourceNamespace, clone.Spec.Selectors)
+	if err != nil {
+		return fmt.Errorf("error getting list of volumes to clone: %v", err)
+	}
+
+	for _, pvc := range pvcList.Items {
+		de, err := a.ensureDataExportFor(pvc, clone.Spec.DestinationNamespace)
+		if err != nil {
+			logrus.Errorf("%s/%s applicationclone: %s", clone.Namespace, clone.Name, err)
+			continue
+		}
+
+		if isTransferCompleted(de) {
+			setStatusSuccessfulFor(clone, pvc.Name)
+		}
+	}
+
+	return nil
+}
+
+func (a *ApplicationCloneController) ensureDataExportFor(srcPVC v1.PersistentVolumeClaim, dstNamespace string) (*v1alpha1.DataExport, error) {
+	de := &v1alpha1.DataExport{}
+	objectKey := types.NamespacedName{
+		Name:      srcPVC.Name,
+		Namespace: srcPVC.Namespace,
+	}
+
+	if err := a.client.Get(context.TODO(), objectKey, de); err != nil {
+		if !errors.IsNotFound(err) {
+			return nil, err
+		}
+		return nil, a.client.Create(context.TODO(), toDataExport(srcPVC, dstNamespace))
+	}
+
+	return de, nil
+}
+
+func toDataExport(srcPVC v1.PersistentVolumeClaim, dstNamespace string) *v1alpha1.DataExport {
+	return &v1alpha1.DataExport{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        srcPVC.Name,
+			Namespace:   srcPVC.Namespace,
+			Labels:      srcPVC.Labels,
+			Annotations: srcPVC.Annotations,
+		},
+		Spec: v1alpha1.DataExportSpec{
+			Type: v1alpha1.DataExportRsync,
+			SnapshotStorageClass: defaultStrokSnapshotStorageClass,
+			Source: v1alpha1.DataExportSource{
+				PersistentVolumeClaim: &v1.PersistentVolumeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      srcPVC.Name,
+						Namespace: srcPVC.Namespace,
+					},
+				},
+			},
+			Destination: v1alpha1.DataExportDestination{
+				PersistentVolumeClaim: &v1.PersistentVolumeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      srcPVC.Name,
+						Namespace: dstNamespace,
+					},
+					Spec: v1.PersistentVolumeClaimSpec{
+						AccessModes:      srcPVC.Spec.AccessModes,
+						StorageClassName: srcPVC.Spec.StorageClassName,
+						Resources:        srcPVC.Spec.Resources,
+					},
+				},
+			},
+		},
+	}
+}
+
 func (a *ApplicationCloneController) deleteClone(clone *stork_api.ApplicationClone) error {
 	return nil
 }
@@ -748,4 +837,31 @@ func (a *ApplicationCloneController) createCRD() error {
 	}
 
 	return apiextensions.Instance().ValidateCRD(resource, validateCRDTimeout, validateCRDInterval)
+}
+
+func isTransferCompleted(de *v1alpha1.DataExport) bool {
+	if de == nil {
+		return false
+	}
+
+	return de.Status.Stage == v1alpha1.DataExportStageFinal && de.Status.Status == v1alpha1.DataExportStatusSuccessful
+}
+
+func isVolumesReady(clone *stork_api.ApplicationClone) bool {
+	for _, vol := range clone.Status.Volumes {
+		if vol.Status != stork_api.ApplicationCloneStatusSuccessful {
+			return false
+		}
+	}
+	return true
+}
+
+func setStatusSuccessfulFor(clone *stork_api.ApplicationClone, pvcName string) {
+	for _, vol := range clone.Status.Volumes {
+		if vol.PersistentVolumeClaim != pvcName {
+			continue
+		}
+		vol.Status = stork_api.ApplicationCloneStatusSuccessful
+		vol.Reason = "Volume cloned succesfully"
+	}
 }
