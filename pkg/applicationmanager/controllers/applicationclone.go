@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"github.com/portworx/sched-ops/k8s/storage"
 	"reflect"
 
 	"github.com/libopenstorage/stork/drivers/volume"
@@ -36,6 +37,7 @@ const (
 	pvNamePrefix = "pvc-"
 
 	defaultStrokSnapshotStorageClass = "stork-snapshot-sc"
+	defaultSnapshotStorageClass = "snapshot-promoter"
 )
 
 // NewApplicationClone create a new instance of ApplicationCloneController.
@@ -301,7 +303,7 @@ func (a *ApplicationCloneController) generateCloneVolumeNames(clone *stork_api.A
 
 	volumeInfos := make([]*stork_api.ApplicationCloneVolumeInfo, 0)
 	for _, pvc := range pvcList.Items {
-		if !a.volDriver.OwnsPVC(&pvc) {
+		if !a.volDriver.OwnsPVC(&pvc) && !dataexportSupported(&pvc) {
 			continue
 		}
 		volume, err := core.Instance().GetVolumeForPersistentVolumeClaim(&pvc)
@@ -750,8 +752,9 @@ func (a *ApplicationCloneController) clonePVCfor(clone *stork_api.ApplicationClo
 		return fmt.Errorf("error getting list of volumes to clone: %v", err)
 	}
 
+	// TODO: iterate over clone.spec.volumes instead
 	for _, pvc := range pvcList.Items {
-		de, err := a.ensureDataExportFor(pvc, clone.Spec.DestinationNamespace)
+		de, err := a.ensureDataExportFor(pvc, clone.Spec)
 		if err != nil {
 			logrus.Errorf("%s/%s applicationclone: %s", clone.Namespace, clone.Name, err)
 			continue
@@ -765,7 +768,7 @@ func (a *ApplicationCloneController) clonePVCfor(clone *stork_api.ApplicationClo
 	return nil
 }
 
-func (a *ApplicationCloneController) ensureDataExportFor(srcPVC v1.PersistentVolumeClaim, dstNamespace string) (*v1alpha1.DataExport, error) {
+func (a *ApplicationCloneController) ensureDataExportFor(srcPVC v1.PersistentVolumeClaim, spec stork_api.ApplicationCloneSpec) (*v1alpha1.DataExport, error) {
 	de := &v1alpha1.DataExport{}
 	objectKey := types.NamespacedName{
 		Name:      srcPVC.Name,
@@ -776,13 +779,32 @@ func (a *ApplicationCloneController) ensureDataExportFor(srcPVC v1.PersistentVol
 		if !errors.IsNotFound(err) {
 			return nil, err
 		}
-		return nil, a.client.Create(context.TODO(), toDataExport(srcPVC, dstNamespace))
+		return nil, a.client.Create(context.TODO(), toDataExport(srcPVC, spec))
 	}
 
 	return de, nil
 }
 
-func toDataExport(srcPVC v1.PersistentVolumeClaim, dstNamespace string) *v1alpha1.DataExport {
+func toStr(ptr *string) string {
+	if ptr == nil {
+		return ""
+	}
+	return *ptr
+}
+
+func toDataExport(srcPVC v1.PersistentVolumeClaim, spec stork_api.ApplicationCloneSpec) *v1alpha1.DataExport {
+	snapStorageClass := defaultStrokSnapshotStorageClass
+	dstStorageClass := srcPVC.Spec.StorageClassName
+
+	if spec.ReplaceStorageClass != nil && spec.ReplaceStorageClass.Source == toStr(srcPVC.Spec.StorageClassName) {
+		if spec.ReplaceStorageClass.Snapshot != "" {
+			snapStorageClass = spec.ReplaceStorageClass.Snapshot
+		}
+		if spec.ReplaceStorageClass.Destination != "" {
+			dstStorageClass = &spec.ReplaceStorageClass.Destination
+		}
+	}
+
 	return &v1alpha1.DataExport{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        srcPVC.Name,
@@ -792,7 +814,7 @@ func toDataExport(srcPVC v1.PersistentVolumeClaim, dstNamespace string) *v1alpha
 		},
 		Spec: v1alpha1.DataExportSpec{
 			Type: v1alpha1.DataExportRsync,
-			SnapshotStorageClass: defaultStrokSnapshotStorageClass,
+			SnapshotStorageClass: snapStorageClass,
 			Source: v1alpha1.DataExportSource{
 				PersistentVolumeClaim: &v1.PersistentVolumeClaim{
 					ObjectMeta: metav1.ObjectMeta{
@@ -805,12 +827,12 @@ func toDataExport(srcPVC v1.PersistentVolumeClaim, dstNamespace string) *v1alpha
 				PersistentVolumeClaim: &v1.PersistentVolumeClaim{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      srcPVC.Name,
-						Namespace: dstNamespace,
+						Namespace: spec.DestinationNamespace,
 					},
 					Spec: v1.PersistentVolumeClaimSpec{
 						AccessModes:      srcPVC.Spec.AccessModes,
-						StorageClassName: srcPVC.Spec.StorageClassName,
 						Resources:        srcPVC.Spec.Resources,
+						StorageClassName: dstStorageClass,
 					},
 				},
 			},
@@ -837,6 +859,30 @@ func (a *ApplicationCloneController) createCRD() error {
 	}
 
 	return apiextensions.Instance().ValidateCRD(resource, validateCRDTimeout, validateCRDInterval)
+}
+
+func dataexportSupported(pvc *v1.PersistentVolumeClaim) bool {
+	if pvc == nil {
+		return false
+	}
+
+	if toStr(pvc.Spec.StorageClassName) == "" {
+		return false
+	}
+
+	sc, err := storage.Instance().GetStorageClass(*pvc.Spec.StorageClassName)
+	if err != nil {
+		// TODO: fixme, demo implementation
+		logrus.Debugf("clone pvc: get %s storageclass: %s", *pvc.Spec.StorageClassName, err)
+		return false
+	}
+
+	switch sc.Provisioner {
+	case "kubernetes.io/glusterfs":
+		return true
+	}
+
+	return false
 }
 
 func isTransferCompleted(de *v1alpha1.DataExport) bool {
